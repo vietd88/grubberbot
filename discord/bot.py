@@ -7,10 +7,10 @@ from discord.ext import commands
 import bot_funcs as bfn
 from pprint import pprint
 import logging
+import datetime
 
 logging.basicConfig(
     filename='grubberbot.log',
-    encoding='utf-8',
     level=logging.DEBUG,
     format='%(asctime)s %(message)s',
     datefmt='%m/%d/%Y %I:%M:%S %p',
