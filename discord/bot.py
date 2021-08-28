@@ -7,7 +7,43 @@ from discord.ext import commands
 import bot_funcs as bfn
 from pprint import pprint
 
+# TODO: what if discord username or chesscom username changes?
 # TODO: !info command
+
+'''
+Commands
+
+# For league membership
+!set_chesscom <chesscom> - renaming !link_chesscom.  !league_ commands won't work until this is done, and this command stops working until the season is done.
+!league_join <player, substitute> - join next season, request a week off with !league_request_substitute
+!league_leave - renaming !leave_rapid_league, to leave next season
+!league_info <optional: @someone> - general league info (schedule, points, etc) optionally ask for info on someone such as membership (this season and next), elo, etc
+!league_join_current - to join current season as a substitute
+
+# for scheduling a game
+!league_game_status <optional: @someone_else> - get info on status of the current game (where to go to talk about it, whether it's even scheduled), optional argument to use on someone else
+!league_schedule_game <date and time> - schedule a game, somehow i'll require confirmation from both players
+!league_set_result <link_to_chesscom_game> - get the result of a game and record it
+
+# for substitutes
+!league_request_substitute <1, 2, 3, 4> - on a given week number request a substitute (resign if no substitute)
+!league_claim_substitution - usable only in a thread, replace the player requesting a substitute in the thread
+
+# mod commands to undo anything or manually set anything
+!mod_set_chesscom <@someone> <chesscom>
+!mod_league_join <@someone> <player, substitute>
+!mod_league_leave <@someone>
+!mod_league_join_this_season - put someone in as substitute or player this season
+!mod_league_leave_this_season - kick someone out this season
+!mod_league_schedule_game - schedule someone else's game
+!mod_league_set_result - manually set the result of a game, optionally link to a chess.com game
+!mod_league_request_substitute - request substitute for someone else
+!mod_league_set_substitution - assign someone else a substitute slot
+
+# commands for no show
+# commands for no scheduling
+# commands to set substitutes
+'''
 
 # Declare variables
 GUILD_NAME = "pawngrubber's server"
@@ -76,6 +112,13 @@ async def link_chesscom(ctx, chesscom_name):
             f'is now linked to Chess.com username `{chesscom_name}`'
         )
     await ctx.send(message)
+
+@link_chesscom.error
+async def link_chesscom_error(ctx, exception):
+    fn_name = 'link_chesscom'
+    general_error_message = bfn.GENERAL_ERROR_MESSAGE.format(fn_name, fn_name)
+    await ctx.send(general_error_message)
+    raise exception
 
 @bot.command(name='leave_rapid_league', help='To leave the upcoming rapid league')
 async def leave_rapid_league(ctx):
