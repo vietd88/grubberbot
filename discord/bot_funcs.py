@@ -10,7 +10,7 @@ DISCORD_CHESSCOM_JSON = 'data/discord_chesscom.json'
 LEAGUE_DIR = 'data/{}'
 LEAGUE_JSON = f'{LEAGUE_DIR}/rapid_league.json'
 
-GENERAL_ERROR_MESSAGE = '`!{}` error, get help with `!help {}`'
+GENERAL_ERROR_MESSAGE = '{} `!{}` error, get help with `!help {}`'
 
 def get_month(next=False):
     date = datetime.datetime.now()
@@ -65,18 +65,23 @@ def exists_chesscom_name(username, return_message=False):
 
     return True
 
-def set_chesscom_name(discord_name, chesscom_name):
+def set_chesscom(discord_id, discord_name, chesscom_name):
     with open(DISCORD_CHESSCOM_JSON, 'r') as f:
         data = json.load(f)
-    data[discord_name] = chesscom_name
+    discord_id = str(discord_id)
+    data[discord_id] = {
+        'discord': discord_name,
+        'chesscom': chesscom_name,
+    }
     with open(DISCORD_CHESSCOM_JSON, 'w') as f:
         json.dump(data, f, sort_keys=True, indent=4)
 
-def get_chesscom_name(discord_name):
+def get_chesscom(discord_id):
     with open(DISCORD_CHESSCOM_JSON, 'r') as f:
         data = json.load(f)
-    if discord_name in data:
-        return data[discord_name]
+    discord_id = str(discord_id)
+    if discord_id in data:
+        return data[discord_id]
     else:
         return None
 
@@ -87,7 +92,7 @@ def set_league(discord_name, player, sub_week):
     if chesscom_name is None:
         raise Exception
     data[discord_name] = {
-        'chesscom_name': chesscom_name,
+        'chesscom': chesscom_name,
         'player': player,
         'sub_week': sub_week,
     }
@@ -158,17 +163,36 @@ def get_rating(chesscom_name):
 def split_into_teams():
     with open(THIS_LEAGUE_JSON, 'r') as f:
         data = json.load(f)
-    print(data)
+    #print(data)
     data = {
         k: {kv: vv for kv, vv in v.items()}.update(**{'rating': get_rating(v['chesscom_name'])})
         for k, v in data.items()
     }
-    print(data)
+    #print(data)
 
 if __name__ == '__main__':
+    with open('mapping.json', 'r') as f:
+        id_dict = json.load(f)
+    print(id_dict)
+
+    '''
+    with open(NEXT_LEAGUE_JSON, 'r') as f:
+        data = json.load(f)
+    data = {
+        k: {
+            'discord': v['discord'],
+            'chesscom': v['chesscom'],
+        } for k, v in data.items()
+    }
+    with open(DISCORD_CHESSCOM_JSON, 'w') as f:
+        json.dump(data, f, sort_keys=True, indent=4)
+    '''
+
+    '''
     username = 'pawngrubber'
     gen_files()
     split_into_teams()
     print(get_rating(username))
     print(get_month())
     print(get_month(next=True))
+    '''
