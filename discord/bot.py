@@ -6,11 +6,22 @@ import discord
 from discord.ext import commands
 import bot_funcs as bfn
 from pprint import pprint
+import logging
+
+logging.basicConfig(
+    filename='grubberbot.log',
+    encoding='utf-8',
+    level=logging.DEBUG,
+    format='%(asctime)s %(message)s',
+    datefmt='%m/%d/%Y %I:%M:%S %p',
+)
 
 # TODO: what if discord username or chesscom username changes?
 # TODO: !info command
 
 '''
+!list_commands
+
 # For league membership
 !set_chesscom <chesscom> - renaming !link_chesscom.  !league_ commands won't work until this is done, and this command stops working until the season is done.
 !league_join <player, substitute> - join next season, request a week off with !league_request_substitute
@@ -58,7 +69,8 @@ def generic_error(fn, fn_name):
     async def error_lambda(ctx, exception):
         general_error_message = bfn.GENERAL_ERROR_MESSAGE.format(fn_name, fn_name)
         await ctx.send(general_error_message)
-        raise exception
+        logging.error(str(exception))
+        print(datetime.datetime.now(), 'Exception logged')
 
 '''
 # For league membership
@@ -100,16 +112,7 @@ async def set_chesscom(ctx, chesscom_name):
             f'is now linked to Chess.com username `{chesscom_name}`'
         )
     await ctx.send(message)
-
 generic_error(set_chesscom, 'set_chesscom')
-'''
-@set_chesscom.error
-async def error_set_chesscom(ctx, exception):
-    fn_name = 'set_chesscom'
-    general_error_message = bfn.GENERAL_ERROR_MESSAGE.format(fn_name, fn_name)
-    await ctx.send(general_error_message)
-    raise exception
-'''
 
 @bot.event
 async def on_ready():
