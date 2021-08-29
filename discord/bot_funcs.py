@@ -47,7 +47,7 @@ def gen_files():
             with open(filename, 'w') as f:
                 json.dump(data, f, sort_keys=True, indent=4)
 
-def exists_chesscom_name(username, return_message=False):
+def exists_chesscom(username, return_message=False):
     url = f'https://api.chess.com/pub/player/{username}'
     try:
         with urllib.request.urlopen(url) as response:
@@ -65,62 +65,78 @@ def exists_chesscom_name(username, return_message=False):
 
     return True
 
-def set_chesscom(discord_id, discord_name, chesscom_name):
+def set_chesscom(discord_id, discord_name, chesscom):
+    discord_id = str(discord_id)
     with open(DISCORD_CHESSCOM_JSON, 'r') as f:
         data = json.load(f)
-    discord_id = str(discord_id)
     data[discord_id] = {
         'discord': discord_name,
-        'chesscom': chesscom_name,
+        'chesscom': chesscom,
     }
     with open(DISCORD_CHESSCOM_JSON, 'w') as f:
         json.dump(data, f, sort_keys=True, indent=4)
 
 def get_chesscom(discord_id):
+    discord_id = str(discord_id)
     with open(DISCORD_CHESSCOM_JSON, 'r') as f:
         data = json.load(f)
+    if discord_id in data:
+        return data[discord_id]['chesscom']
+    else:
+        return None
+
+def set_league(discord_id, discord_name, join_type):
     discord_id = str(discord_id)
+    with open(NEXT_LEAGUE_JSON, 'r') as f:
+        data = json.load(f)
+    chesscom = get_chesscom(discord_id)
+    if chesscom is None:
+        raise Exception
+    if discord_id in data:
+        data[discord_id] = {
+            'discord': discord_name,
+            'chesscom': chesscom,
+            'join_type': join_type,
+            'sub_week': data[discord_id]['sub_week'],
+        }
+    else:
+        data[discord_id] = {
+            'discord': discord_name,
+            'chesscom': chesscom,
+            'join_type': join_type,
+            'sub_week': {i: False for i in range(1, 5)},
+        }
+    with open(NEXT_LEAGUE_JSON, 'w') as f:
+        json.dump(data, f, sort_keys=True, indent=4)
+
+def get_league(discord_id):
+    discord_id = str(discord_id)
+    with open(NEXT_LEAGUE_JSON, 'r') as f:
+        data = json.load(f)
     if discord_id in data:
         return data[discord_id]
     else:
         return None
 
-def set_league(discord_name, player, sub_week):
+def get_league_info():
     with open(NEXT_LEAGUE_JSON, 'r') as f:
         data = json.load(f)
-    chesscom_name = get_chesscom_name(discord_name)
-    if chesscom_name is None:
-        raise Exception
-    data[discord_name] = {
-        'chesscom': chesscom_name,
-        'player': player,
-        'sub_week': sub_week,
-    }
-    with open(NEXT_LEAGUE_JSON, 'w') as f:
-        json.dump(data, f, sort_keys=True, indent=4)
+    return data
 
-def get_league(discord_name):
+def del_league(discord_id):
+    discord_id = str(discord_id)
     with open(NEXT_LEAGUE_JSON, 'r') as f:
         data = json.load(f)
-    if discord_name in data:
-        return data[discord_name]
-    else:
+    if discord_id not in data:
         return None
-
-def del_league(discord_name):
-    with open(NEXT_LEAGUE_JSON, 'r') as f:
-        data = json.load(f)
-    if discord_name in data:
-        output = data[discord_name]
-        del data[discord_name]
-    else:
-        output = None
+    output = data[discord_id]
+    del data[discord_id]
     with open(NEXT_LEAGUE_JSON, 'w') as f:
         json.dump(data, f, sort_keys=True, indent=4)
     return output
 
-def count_games(chesscom_name, rapid=False):
-    url = f'https://api.chess.com/pub/player/{chesscom_name}/stats'
+def count_games(chesscom, rapid=False):
+    url = f'https://api.chess.com/pub/player/{chesscom}/stats'
     with urllib.request.urlopen(url) as response:
         info = response.read()
     info = json.loads(info)
@@ -151,8 +167,10 @@ def count_games(chesscom_name, rapid=False):
 
     return num_games
 
-def get_rating(chesscom_name):
-    url = f'https://api.chess.com/pub/player/{chesscom_name}/stats'
+def get_rating(chesscom):
+    if chesscom is None:
+        return None
+    url = f'https://api.chess.com/pub/player/{chesscom}/stats'
     with urllib.request.urlopen(url) as response:
         info = response.read()
     info = json.loads(info)
@@ -165,7 +183,7 @@ def split_into_teams():
         data = json.load(f)
     #print(data)
     data = {
-        k: {kv: vv for kv, vv in v.items()}.update(**{'rating': get_rating(v['chesscom_name'])})
+        k: {kv: vv for kv, vv in v.items()}.update(**{'rating': get_rating(v['chesscom'])})
         for k, v in data.items()
     }
     #print(data)
