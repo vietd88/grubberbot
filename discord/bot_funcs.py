@@ -167,7 +167,7 @@ class ChesscomDatabase:
             'chess_daily',
             #'fide',
         ]
-        wdl_list = ['win', 'loss', 'draw']
+        wdl_list = ['win', 'draw', 'loss']
 
         output = {}
         for category in categories:
