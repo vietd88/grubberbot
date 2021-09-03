@@ -4,12 +4,13 @@ from dotenv import load_dotenv
 import json
 import discord
 from discord.ext import commands
-import bot_funcs as bfn
-import discord_funcs as dfn
 from pprint import pprint
 import logging
 import datetime
 from typing import Optional
+
+import bot_funcs as bfn
+import discord_funcs as dfn
 
 logging.basicConfig(
     filename='grubberbot.log',
@@ -23,7 +24,9 @@ MODERATOR_ROLES = [
     'Cool People',
 ]
 
-# TODO: Backup json data
+# TODO: sql injection problem
+# TODO: @everyone problem
+# TODO: Backup sqlite3 data
 # TODO: what if discord username or chesscom username changes?
 # TODO: !info command
 # TODO: enforce 1:1 discord and chesscom usernames in both directions
@@ -44,7 +47,7 @@ MODERATOR_ROLES = [
 !league_set_result <link_to_chesscom_game> - get the result of a game and record it
 
 # for substitutes
-!league_request_substitute <1, 2, 3, 4> - on a given week number request a substitute (resign if no substitute)
+!league_request_substitute <this_season, next_season> <1, 2, 3, 4> - on a given week number request a substitute (resign if no substitute)
 !league_claim_substitution - usable only in a thread, replace the player requesting a substitute in the thread
 
 # mod commands to do anything or manually set anything
@@ -62,18 +65,51 @@ MODERATOR_ROLES = [
 # Declare variables
 GUILD_NAME = "pawngrubber's server"
 
-# Build files if they don't already exist
-bfn.gen_files()
-
 # Read secret information from .env file
 load_dotenv()
-TOKEN = os.getenv('DISCORD_TOKEN')
+DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
 
 # The bot
 bot = commands.Bot(command_prefix='!')
 
+# Database stuff
+LDB = bfn.LeagueDatabase()
+def set_league(discord_id, join_type):
+    LDB.league_join(
+        LDB.get_month(bfn.NEXT_MONTH),
+        discord_id,
+        join_type=='player',
+    )
+
+def del_league(discord_id):
+    possible_error = False
+    try:
+        LDB.league_leave(
+            LDB.get_month(bfn.NEXT_MONTH),
+            discord_id,
+        )
+    except Exception as e:
+        possible_error = e
+        logging.error(f'DELETED {discord_id} and raised an error:')
+        logging.error(str(possible_error))
+    return possible_error
+
+def set_sub_week(discord_id, user, sub_week):
+    df = LDB.get_league_info(user.id)
+    if len(df) == 0:
+        return None
+    possible_error = False
+    try:
+        LDB.request_sub(
+            LDB.get_month(bfn.NEXT_MONTH), sub_week, discord_id)
+    except Exception as e:
+        possible_error = None
+        logging.error(f'DELETED {discord_id} and raised an error:')
+        logging.error(str(possible_error))
+    return possible_error
+
 # Generic error message
-# TODO: replac with generic event handling
+# TODO: replace with generic event handling
 def generic_error(fn, fn_name):
     @fn.error
     async def error_lambda(ctx, exception):
@@ -94,6 +130,7 @@ def generic_error(fn, fn_name):
         ])
         logging.error(logging_message)
         print(datetime.datetime.now(), 'Exception logged')
+        print(logging_message)
 
 '''
 # For league membership
@@ -106,13 +143,14 @@ def generic_error(fn, fn_name):
 
 # League membership
 async def set_chesscom(mention, user, chesscom):
-    if not bfn.exists_chesscom(chesscom):
+    LDB.update_signup_info(LDB.get_month(bfn.NEXT_MONTH))
+    if not LDB.chess_db.exists_chesscom(chesscom):
         message = f'{mention} Chess.com username not found: `{chesscom}`'
         return message
 
-    name_data = bfn.get_chesscom(user.id)
-    bfn.set_chesscom(user.id, str(user), chesscom)
-    if name_data is None:
+    user_data = LDB.get_user_data(user.id)
+    LDB.set_chesscom(user.id, str(user), chesscom)
+    if len(user_data) < 1:
         message = (
             f'{mention} successfully linked '
             f'{user.mention} to Chess.com username `{chesscom}`'
@@ -120,8 +158,9 @@ async def set_chesscom(mention, user, chesscom):
     else:
         message = (
             f'{mention} user {user.mention} was linked to Chess.com username '
-            f'`{name_data}` but is now linked to `{chesscom}`'
+            f'`{user_data["chesscom"][0]}` but is now linked to `{chesscom}`'
         )
+    LDB.update_signup_info(LDB.get_month(bfn.NEXT_MONTH))
     return message
 
 help_text = 'Link your chess.com account to your discord account'
@@ -143,6 +182,7 @@ async def mod_set_chesscom(ctx, discord_mention: discord.Member, chesscom: str):
 generic_error(mod_set_chesscom, 'mod_set_chesscom')
 
 async def league_join(mention, user, join_type, mod=False):
+    LDB.update_signup_info(LDB.get_month(bfn.NEXT_MONTH))
     if mod:
         fn_name = 'mod_league_join'
     else:
@@ -150,55 +190,47 @@ async def league_join(mention, user, join_type, mod=False):
     general_error_message = bfn.GENERAL_ERROR_MESSAGE.format(
         mention, fn_name, fn_name)
 
-    chesscom = bfn.get_chesscom(user.id)
-    num_games = bfn.count_games(chesscom)
-    num_rapid_games = bfn.count_games(chesscom, rapid=True)
+    user_data = LDB.get_user_data(user.id)
     player_args = ['player', 'substitute']
 
     errors = []
-    if chesscom is None:
+    if len(user_data) < 1:
         if mod:
-            errors.append(f'Chess.com not yet linked, use `!mod_link_chesscom`')
+            errors.append(f'Chess.com not yet linked, use `!mod_set_chesscom`')
         else:
-            errors.append(f'Chess.com not yet linked, use `!link_chesscom`')
-    if not join_type in player_args:
-        errors.append(f'Expected `{player_args}`, instead found: `{join_type}`')
-    if num_rapid_games < 10:
-        errors.append(
-            f'Minimum 10 rapid games required, `{chesscom}` '
-            f'has played only `{num_rapid_games}` rapid games'
-        )
-    if num_games < 50:
-        errors.append(
-            f'Minimum 50 games of any time control required, `{chesscom}`'
-            f' has played only `{num_games}` games'
-        )
+            errors.append(f'Chess.com not yet linked, use `!set_chesscom`')
+    else:
+        chesscom = user_data['chesscom'][0]
+        count_info = LDB.chess_db.get_count(chesscom)
+        num_games = count_info['total_count']
+        num_rapid_games = count_info['rapid_count']
+        if not join_type in player_args:
+            errors.append(f'Expected `{player_args}`, instead found: `{join_type}`')
+        if num_rapid_games < 10:
+            errors.append(
+                f'Minimum 10 rapid games required, `{chesscom}` '
+                f'has played only `{num_rapid_games}` rapid games'
+            )
+        if num_games < 50:
+            errors.append(
+                f'Minimum 50 games of any time control required, `{chesscom}`'
+                f' has played only `{num_games}` games'
+            )
 
-    league_data = bfn.get_league(user.id)
-    next_month = bfn.get_month(next=True)
+        next_month = LDB.get_month(bfn.NEXT_MONTH)
 
     if errors:
         errors = ['* ' + e for e in errors]
         errors = [general_error_message] + errors
         message = '\n'.join(errors)
-    elif league_data is None:
-        bfn.set_league(user.id, str(user), join_type)
+    else:
+        set_league(user.id, join_type)
         message = '\n'.join([
             f'{mention} added {user.mention} to the league `{next_month}` season',
             f'* Chess.com username: `{chesscom}`',
             f'* Signed up as a: `{join_type}`',
         ])
-    else:
-        bfn.set_league(user.id, str(user), join_type)
-        message = '\n'.join([
-            f'{mention}: {user.mention} already in the `{next_month}` season',
-            f'* Chess.com username: `{league_data["chesscom"]}`',
-            f'* Signed up as a: `{league_data["join_type"]}`',
-            '',
-            f'Changed {user.mention} info for the `{next_month}` season to',
-            f'* Chess.com username: `{chesscom}`',
-            f'* Signed up as a: `{join_type}`',
-        ])
+    LDB.update_signup_info(LDB.get_month(bfn.NEXT_MONTH))
     return message
 
 help_text = '\n'.join([
@@ -222,15 +254,16 @@ help_text = '\n'.join([
 @commands.has_any_role(*MODERATOR_ROLES)
 async def mod_league_join(ctx, discord_mention: discord.Member, join_type: str):
     mention = ctx.message.author.mention
-    message = await league_join(mention, discord_mention, join_type)
+    message = await league_join(mention, discord_mention, join_type, mod=True)
     await ctx.send(message)
 generic_error(mod_league_join, 'mod_league_join')
 
 async def league_leave(mention, user):
-    league_data = bfn.del_league(user.id)
-    next_month = bfn.get_month(next=True)
+    LDB.update_signup_info(LDB.get_month(bfn.NEXT_MONTH))
+    possible_error = del_league(user.id)
+    next_month = LDB.get_month(bfn.NEXT_MONTH)
 
-    if league_data is None:
+    if possible_error:
         message = (
             f'{mention} user {user.mention} is not currently signed up '
             f'for the rapid league `{next_month}` season'
@@ -240,6 +273,7 @@ async def league_leave(mention, user):
             f'{mention} user {user.mention} has left the '
             f'rapid league `{next_month}` season'
         )
+    LDB.update_signup_info(LDB.get_month(bfn.NEXT_MONTH))
     return message
 
 @bot.command(name='league_leave', help='To leave the upcoming rapid league')
@@ -258,101 +292,99 @@ async def mod_league_leave(ctx, discord_mention: discord.Member):
     await ctx.send(message)
 generic_error(mod_league_leave, 'mod_league_leave')
 
-# !league_info <optional: @someone> - general league info (schedule, points, etc) optionally ask for info on someone such as membership (this season and next), elo, etc
-help_text = 'Get league info, optionally @mention someone to get info about them'
-@bot.command(name='league_info', help=help_text)
-async def league_info(ctx, discord_mention: Optional[discord.Member]):
-    mention = ctx.message.author.mention
-    user = discord_mention
+async def league_request_substitute(mention, user, season, sub_week, mod=False):
+    LDB.update_signup_info(LDB.get_month(bfn.NEXT_MONTH))
+    sub_weeks = ['1', '2', '3', '4']
+    if sub_week not in sub_weeks:
+        message = (
+            f'{mention} Expected one of `{sub_weeks}`, instead got `{sub_week}`'
+        )
+        return message
 
-    next_month = bfn.get_month(next=True)
-    if discord_mention is None:
-        data = bfn.get_league_info()
-        message = '\n'.join([
-            f'{mention} ',
-            f'* Number of members in the {next_month} season: {len(data)}',
-        ])
-    else:
-        league_data = bfn.get_league(user.id)
-        if league_data is None:
-            message = f'{mention} user {user.mention} is not signed up for the league {next_month} season'
+    '''
+    seasons = ['this_season, next_season']
+    if season not in seasons:
+        message = (
+            f'{mention} Expected one of `{seasons}`, instead got `{season}`'
+        )
+        return message
+    '''
+
+    user_data = LDB.get_user_data(user.id)
+
+    if len(user_data) < 1:
+        if mod:
+            error_command = '!mod_set_chesscom'
         else:
-            chesscom = bfn.get_chesscom(user.id)
-            rapid_rating = bfn.get_rating(chesscom)
-            #num_games = bfn.count_games(chesscom)
-            #num_rapid_games = bfn.count_games(chesscom, rapid=True)
-            message = '\n'.join([
-                f'{mention} the user {user.mention} has:',
-                f'* the Chess.com username: {chesscom}',
-                f'* the Rapid rating: {rapid_rating}',
-                f'* signed up for the {next_month} season',
-            ])
+            error_command = '!set_chesscom'
+        message = (
+            f'{mention} User {user.mention} has not yet linked to chesscom, '
+            f' use !{error_command}'
+        )
+        return message
+    chesscom = user_data['chesscom'][0]
 
+    next_month = LDB.get_month(bfn.NEXT_MONTH)
+    possible_error = set_sub_week(user.id, user, sub_week)
+
+    if possible_error is None:
+        message = (
+            f'{mention} user {user.mention} is not currently signed up '
+            f'for the rapid league `{next_month}` season'
+        )
+    else:
+        message = (
+            f'{mention} user {user.mention} has requested a substitute on '
+            f'week {sub_week} of the rapid league `{next_month}` season'
+        )
+    LDB.update_signup_info(LDB.get_month(bfn.NEXT_MONTH))
+    return message
+
+help_text = '\n'.join([
+    '    <sub_week> one of `1, 2, 3, 4` for the week you want a substitute'
+])
+@bot.command(name='league_request_substitute', help=help_text)
+async def user_league_request_substitute(ctx, sub_week):
+    user = ctx.message.author
+    mention = user.mention
+    season = LDB.get_month(bfn.NEXT_MONTH)
+    message = await league_request_substitute(mention, user, season, sub_week)
     await ctx.send(message)
-generic_error(league_info, 'league_info')
+generic_error(user_league_request_substitute, 'league_request_substitute')
+
+help_text = '\n'.join([
+    '    <discord_mention> use @someone'
+    '    <sub_week> one of `1, 2, 3, 4` for the week you want a substitute'
+])
+@bot.command(name='mod_league_request_substitute', help=help_text)
+@commands.has_any_role(*MODERATOR_ROLES)
+async def mod_league_request_substitute(ctx, discord_mention: discord.Member, sub_week):
+    mention = ctx.message.author.mention
+    season = LDB.get_month(bfn.NEXT_MONTH)
+    message = await league_request_substitute(mention, discord_mention, season, sub_week, mod=True)
+    await ctx.send(message)
+generic_error(mod_league_request_substitute, 'mod_league_request_substitute')
 
 @bot.event
 async def on_ready():
     guild = discord.utils.get(bot.guilds, name=GUILD_NAME)
     print(f'Bot {bot.user.name} has connected to {guild.name}')
+    LDB.update_signup_info(LDB.get_month(bfn.NEXT_MONTH))
+    await dfn.announce_pairing(bot, guild)
 
-    '''
-    channel = discord.utils.get(guild.channels, name='grubberbot-debug')
-    thread = await channel.create_thread(
-        name='grubberbot-test-thread',
-        #message='test123',
-        type=discord.ChannelType.public_thread,
-        reason='testing-purposes',
-    )
-    await thread.send('test message')
-    print('thread created')
-    '''
-
-@bot.command(name='test')
-async def test(ctx):
-    #print(type(ctx))
-    #await ctx.message.create_thread('autogeneratedthread')
-    #await thread.send('test thread')
-    await ctx.send('test successful')
-
-'''
-# General error handling
 @bot.event
 async def on_command_error(ctx, exception):
-    if isinstance(exception, commands.errors.CheckFailure):
-        await ctx.send('You do not have the correct role for this command.')
-'''
+    message = dfn.on_command_error(ctx, exception)
+    if message is not None:
+        await ctx.send(message)
 
-class CustomClient(discord.Client):
-    async def on_ready(self):
-        guild = discord.utils.get(client.guilds, name=GUILD_NAME)
-        print(f'Client {client.user} has connected to {guild.name}')
-        print(guild.members)
+def main():
 
-        data = {
-            str(member): member.id for member in guild.members
-        }
-        with open('mapping.json', 'w') as f:
-            json.dump(data, f, sort_keys=True, indent=4)
+    bot.add_command(dfn.test)
 
-'''
-        channel = discord.utils.get(guild.channels, name='grubberbot-debug')
-        print(channel)
-        thread = await channel.create_thread(
-            name='grubberbot-test-thread',
-            #message='test123',
-            type=discord.ChannelType.public_thread,
-            reason='testing-purposes',
-        )
-        await thread.send('test message')
-'''
+    bot.add_command(dfn.league_info)
+
+    bot.run(DISCORD_TOKEN)
 
 if __name__ == '__main__':
-    '''
-    intents = discord.Intents.default()
-    intents.members = True
-    client = CustomClient(intents=intents)
-    client.run(TOKEN)
-    '''
-
-    bot.run(TOKEN)
+    main()
