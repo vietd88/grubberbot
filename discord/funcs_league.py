@@ -13,316 +13,22 @@ import pandas as pd
 from tqdm import tqdm
 import time
 import random
-import gspread
+import chessdotcom as cdc
+import chess
+import chess.pgn
+import re
+
+import funcs_chesscom as fcc
+import funcs_general as fgg
 
 # TODO: set iter time to be higher
 
 GENERAL_ERROR_MESSAGE = '{} `!{}` error, get help with `!help {}`'
 
-TOKEN = 'data/grubberbot-2f9a174696fa.json'
-SHEET_NAME = '1SFH7ntDpDW7blX_xBU_m_kSmvY2tLXkuwq-TOM9wyew'
-
 # TODO: Change this to 1
 NEXT_MONTH = 0
-CHESSCOM_DB = 'data/chesscom.sqlite3'
 LEAGUE_DB = 'data/rapid_league.sqlite3'
 SIGNUP_TEAM = 'signup'
-
-def df_to_sheet(df, sheet=1):
-    gc = gspread.service_account(filename=TOKEN)
-    sh = gc.open_by_key(SHEET_NAME)
-    sheet = sh.get_worksheet(sheet-1)
-
-    to_update = []
-    to_update = to_update + [df.columns.values.tolist()]
-    to_update = to_update + df.values.tolist()
-    to_update = to_update + [
-        ['' for _ in range(len(df.columns))]
-        for _ in range(100)
-    ]
-    sheet.update(to_update)
-
-class ChesscomDatabase:
-
-    def __init__(self, path=CHESSCOM_DB, wait_time=(30*60)):
-        self.path = path
-        self.conn = sqlite3.connect(self.path)
-        self.cur = self.conn.cursor()
-        self.conn.execute('PRAGMA foreign_keys = 1')
-        self.conn.commit()
-        self.init_tables()
-        self.wait_time = wait_time
-
-    def quit(self):
-        self.conn.close()
-
-    def get_all_tables(self):
-        sql = "SELECT name FROM sqlite_master WHERE type='table';"
-        output = self.conn.execute(sql)
-        df_dict = {}
-        for table in output.fetchall():
-            df = pd.read_sql_query(f'SELECT * FROM {table[0]}', self.conn)
-            df_dict[table[0]] = df
-        return df_dict
-
-    def init_tables(self):
-
-        # Users, id is their discord id
-        chess_tbl_sql = '''
-        CREATE TABLE IF NOT EXISTS chess(
-            id integer PRIMARY KEY,
-            chesscom text NOT NULL UNIQUE,
-
-            exists_user integer,
-            exists_time integer,
-
-            rapid integer,
-            rapid_last integer,
-            blitz integer,
-            blitz_last integer,
-            bullet integer,
-            bullet_last integer,
-            rating_time integer,
-
-            total_count integer,
-            rapid_count integer,
-            blitz_count integer,
-            bullet_count integer,
-            count_time integer
-        );'''
-        # TODO: Force users in a game to also be in the season
-
-        queries = [
-            chess_tbl_sql,
-        ]
-        for query in queries:
-            self.cur.execute(query)
-        self.conn.commit()
-
-    def _set_exists(self, chesscom, return_message=False):
-        url = f'https://api.chess.com/pub/player/{chesscom}'
-        try:
-            with urllib.request.urlopen(url) as response:
-                info = response.read()
-        except urllib.error.HTTPError:
-            return False
-        info = json.loads(info)
-
-        if return_message:
-            return info
-
-        if 'error' in info:
-            if 'Not Found' in info['error']:
-                return False
-
-        return True
-
-    def set_exists(self, chesscom):
-        exists_user = self._set_exists(chesscom)
-        exists_time = time.time()
-        sql = '''
-        INSERT INTO chess(chesscom, exists_user, exists_time) VALUES(?, ?, ?)
-        ON CONFLICT(chesscom) DO UPDATE
-        SET exists_user = ?, exists_time = ? WHERE chess.chesscom = ?
-        ;'''
-        params = (
-            chesscom, exists_user, exists_time,
-            exists_user, exists_time, chesscom,
-        )
-        self.cur.execute(sql, params)
-        self.conn.commit()
-        return exists_user
-
-    def get_exists(self, chesscom):
-        sql = '''
-        SELECT c.exists_user, c.exists_time FROM chess AS c
-        WHERE c.chesscom = ?
-        ;'''
-        params = (chesscom,)
-        df = pd.read_sql_query(sql, self.conn, params=params)
-
-        if len(df) == 0 or (time.time()-df['exists_time'][0] > self.wait_time):
-            return self.set_exists(chesscom)
-        else:
-            return df['exists_user'][0]
-
-    def _set_count(self, chesscom):
-        exists = self.get_exists(chesscom)
-        if exists is None or not exists:
-            return None
-
-        url = f'https://api.chess.com/pub/player/{chesscom}/stats'
-        with urllib.request.urlopen(url) as response:
-            info = response.read()
-        info = json.loads(info)
-
-        categories = [
-            'chess_rapid',
-            #'lessons',
-            #'tactics',
-            'chess960_daily',
-            'chess_blitz',
-            #'puzzle_rush',
-            'chess_bullet',
-            'chess_daily',
-            #'fide',
-        ]
-        wdl_list = ['win', 'draw', 'loss']
-
-        output = {}
-        for category in categories:
-            num_games = 0
-            try:
-                wdl = info[category]['record']
-            except KeyError:
-                wdl = {'win': 0, 'draw': 0, 'loss': 0}
-            val = sum([v for k, v in wdl.items() if k in wdl_list])
-            output[category] = val
-
-        new_output = {}
-        new_output['rapid_count'] = output['chess_rapid']
-        new_output['blitz_count'] = output['chess_blitz']
-        new_output['bullet_count'] = output['chess_bullet']
-        new_output['total_count'] = sum([v for k, v in output.items()])
-        new_output['count_time'] = time.time()
-        output = new_output
-        return output
-
-    def set_count(self, chesscom):
-        exists = self.get_exists(chesscom)
-        if exists is None or not exists:
-            return None
-
-        sql = '''
-        UPDATE chess SET
-            rapid_count = ?,
-            blitz_count = ?,
-            bullet_count = ?,
-            total_count = ?,
-            count_time = ?
-        WHERE chess.chesscom = ?
-        ;'''
-
-        info = self._set_count(chesscom)
-        params = (
-            info['rapid_count'],
-            info['blitz_count'],
-            info['bullet_count'],
-            info['total_count'],
-            info['count_time'],
-            chesscom,
-        )
-        self.cur.execute(sql, params)
-        self.conn.commit()
-        return info
-
-    def get_count(self, chesscom):
-        exists = self.get_exists(chesscom)
-        if exists is None or not exists:
-            return None
-
-        sql = '''
-        SELECT
-            c.rapid_count,
-            c.blitz_count,
-            c.bullet_count,
-            c.total_count,
-            c.count_time
-        FROM chess AS c
-        WHERE c.chesscom = ? AND c.count_time IS NOT NULL
-        ;'''
-        params = (chesscom,)
-        df = pd.read_sql_query(sql, self.conn, params=params)
-
-        if len(df) == 0 or (time.time()-df['count_time'][0] > self.wait_time):
-            return self.set_count(chesscom)
-        else:
-            info = {str(c): df[c][0] for c in df.columns}
-            return info
-
-    def _set_rating(self, chesscom):
-        exists = self.get_exists(chesscom)
-        if exists is None or not exists:
-            return None
-
-        url = f'https://api.chess.com/pub/player/{chesscom}/stats'
-        with urllib.request.urlopen(url) as response:
-            info = response.read()
-        info = json.loads(info)
-        names = {
-            'rapid': ['chess_rapid', 'last', 'rating'],
-            'blitz': ['chess_blitz', 'last', 'rating'],
-            'bullet': ['chess_bullet', 'last', 'rating'],
-            'rapid_last': ['chess_rapid', 'last', 'date'],
-            'blitz_last': ['chess_blitz', 'last', 'date'],
-            'bullet_last': ['chess_bullet', 'last', 'date'],
-        }
-        output = {}
-        for k, v in names.items():
-            try:
-                val = info[v[0]][v[1]][v[2]]# if not KeyError else None
-            except KeyError as e:
-                val = None
-            output[k] = val
-        output['rating_time'] = time.time()
-        return output
-
-    def set_rating(self, chesscom):
-        exists = self.get_exists(chesscom)
-        if exists is None or not exists:
-            return None
-
-        sql = '''
-        UPDATE chess SET
-            rapid = ?,
-            blitz = ?,
-            bullet = ?,
-            rapid_last = ?,
-            blitz_last = ?,
-            bullet_last = ?,
-            rating_time = ?
-        WHERE chess.chesscom = ?
-        ;'''
-        info = self._set_rating(chesscom)
-        params = (
-            info['rapid'],
-            info['blitz'],
-            info['bullet'],
-            info['rapid_last'],
-            info['blitz_last'],
-            info['bullet_last'],
-            info['rating_time'],
-            chesscom,
-        )
-        self.cur.execute(sql, params)
-        self.conn.commit()
-        return info
-
-    def get_rating(self, chesscom):
-        exists = self.get_exists(chesscom)
-        if exists is None or not exists:
-            return None
-
-        sql = '''
-        SELECT
-            c.rapid,
-            c.blitz,
-            c.bullet,
-            c.rapid_last,
-            c.blitz_last,
-            c.bullet_last,
-            c.rating_time
-        FROM chess AS c
-        WHERE c.chesscom = ? AND c.rating_time IS NOT NULL
-        ;'''
-        params = (chesscom,)
-        df = pd.read_sql_query(sql, self.conn, params=params)
-
-        if len(df) == 0 or (time.time()-df['rating_time'][0] > self.wait_time):
-            return self.set_rating(chesscom)
-        else:
-            info = {str(c): df[c][0] for c in df.columns}
-            return info
 
 class LeagueDatabase:
 
@@ -334,7 +40,7 @@ class LeagueDatabase:
         self.conn.commit()
         self.init_tables()
         self.init_season()
-        self.chess_db = ChesscomDatabase()
+        self.chess_db = fcc.ChesscomDatabase()
 
     def quit(self):
         self.conn.close()
@@ -448,7 +154,7 @@ class LeagueDatabase:
         VALUES((SELECT id FROM season WHERE name = ?), ?)
         ;'''
 
-        months = [self.get_month(i) for i in range(12)]
+        months = [fgg.get_month(i) for i in range(12)]
         for month in months:
             self.cur.execute(season_sql, (month,))
             for i in range(1, 5):
@@ -458,8 +164,7 @@ class LeagueDatabase:
 
         self.conn.commit()
 
-    def get_league_info(self, discord_id):
-        season_name = self.get_month(0)
+    def get_league_info(self, season_name, discord_id):
         sql = '''
         WITH season_ids AS (SELECT s.id FROM season AS s WHERE s.name = ?),
         user_subset AS (SELECT u.* FROM user AS u WHERE u.discord_id = ?)
@@ -696,16 +401,6 @@ class LeagueDatabase:
         if sub_week is not None:
             self.request_sub(season_name, sub_week, discord_id)
 
-    def get_month(self, next=0):
-        date = datetime.datetime.now()
-        for i in range(next):
-            delta = datetime.timedelta(32 - date.day)
-            date = date + delta
-            date = date.replace(day=1)
-
-        date_string = date.strftime('%Y%B')
-        return date_string
-
     def get_team_names(self, season_name):
         # Grab team names
         sql = '''
@@ -847,7 +542,7 @@ class LeagueDatabase:
             self.cur.execute(sql, params)
         self.conn.commit()
 
-    def get_week_games(self, season_name, week_num):
+    def get_games_by_week(self, season_name, week_num):
         sql = '''
         WITH season_ids AS (SELECT s.id FROM season AS s WHERE s.name = ?),
         team_ids AS (SELECT t.id FROM team AS t WHERE t.season_id IN season_ids),
@@ -865,6 +560,7 @@ class LeagueDatabase:
             WHERE s.week_id IN week_ids AND s.sub_member_id IN member_ids
         )
         SELECT
+            g.id,
             g.schedule,
             g.result,
             g.url,
@@ -886,6 +582,7 @@ class LeagueDatabase:
         params = (season_name, week_num)
         df = pd.read_sql_query(sql, self.conn, params=params)
         df.columns = [
+            'game_id',
             'schedule',
             'result',
             'url',
@@ -904,18 +601,6 @@ class LeagueDatabase:
             self.chess_db.get_rating(c)['rapid']
             for c in df['black_chesscom']
         ]
-        to_sheet = df[[
-            'white_discord_name',
-            'white_chesscom',
-            'white_rapid_rating',
-            'black_rapid_rating',
-            'black_chesscom',
-            'black_discord_name',
-            'schedule',
-            'result',
-            'url',
-        ]]
-        df_to_sheet(to_sheet, sheet=2)
         return df
 
     def set_team_names(self, season_name, team_names):
@@ -975,7 +660,61 @@ class LeagueDatabase:
             ignore_index=True,
         )
 
-        df_to_sheet(df)
+        fgg.df_to_sheet(df, sheet=0)
+        return df
+
+    def set_result(self, game_id, result, url=None):
+        sql = '''
+        UPDATE game SET result = ?, url = ? WHERE game.id = ?
+        ;'''
+        params = (result, url, game_id)
+        self.cur.execute(sql, params)
+        self.conn.commit()
+
+    def get_game_by_id(self, game_id):
+        sql = '''
+        SELECT
+            g.id,
+            g.schedule,
+            g.result,
+            g.url,
+            wu.discord_id,
+            wu.discord_name,
+            wu.chesscom,
+            bu.discord_id,
+            bu.discord_name,
+            bu.chesscom
+        FROM game AS g
+        LEFT JOIN seed AS ws ON g.white_seed_id = ws.id
+        LEFT JOIN member AS wm ON ws.member_id = wm.id
+        LEFT JOIN user AS wu ON wm.user_id = wu.id
+        LEFT JOIN seed AS bs ON g.black_seed_id = bs.id
+        LEFT JOIN member AS bm ON bs.member_id = bm.id
+        LEFT JOIN user AS bu ON bm.user_id = bu.id
+        WHERE g.id = ?
+        ;'''
+        params = (game_id,)
+        df = pd.read_sql_query(sql, self.conn, params=params)
+        df.columns = [
+            'game_id',
+            'schedule',
+            'result',
+            'url',
+            'white_discord_id',
+            'white_discord_name',
+            'white_chesscom',
+            'black_discord_id',
+            'black_discord_name',
+            'black_chesscom',
+        ]
+        df['white_rapid_rating'] = [
+            self.chess_db.get_rating(c)['rapid']
+            for c in df['white_chesscom']
+        ]
+        df['black_rapid_rating'] = [
+            self.chess_db.get_rating(c)['rapid']
+            for c in df['black_chesscom']
+        ]
         return df
 
 def gen_split_score(df, splits):
@@ -1038,7 +777,7 @@ def even_split(df, team_names, iter_time=10, verbose=False):
     dfs = {t: df.iloc[s] for t, s in zip(team_names, splits)}
     return dfs
 
-'''
+def read_history():
     history = 'data/discord_history.parquet'
     df = pd.read_parquet(history)
     df = df[[row.text.startswith('!') for row in df.itertuples()]]
@@ -1077,8 +816,53 @@ def even_split(df, team_names, iter_time=10, verbose=False):
     e_text = ''
     LDB = LeagueDatabase()
 
+    def title_to_game_id(title):
+        season_name = fgg.get_month(NEXT_MONTH)
+        df = LDB.get_games_by_week(season_name, 1)
+
+        id_dict = {
+            (
+                row.white_discord_name.replace('#', ''),
+                row.black_discord_name.replace('#', ''),
+            ): row.game_id for row in df.itertuples()
+        }
+
+        split = title.split(' ')
+        white_name = split[2]
+        black_name = split[4]
+        key = (white_name, black_name)
+        game_id = id_dict[key]
+        return game_id
+
+    import funcs_discord as fdd
+    class User:
+        def __init__(self, mention, id_):
+            self.id = id_
+            self.mention = mention
     for row in tqdm(df.itertuples(), total=len(df)):
         split = row.text.split(' ')
+        if split[0].startswith('!league_set_result') and len(split) > 1:
+            try:
+                game_id = title_to_game_id(row.channel)
+            except KeyError:
+                continue
+            except IndexError:
+                continue
+            try:
+                elem = {
+                    'mention': 'me',
+                    'user': User('you', row.discord_id),
+                    'game_id': game_id,
+                    'url': split[1]
+                }
+            except IndexError as e:
+                continue
+            pprint(elem)
+            msg = fdd.league_set_result(**elem)
+            print(msg)
+            print()
+            #LDB.set_result(**elem)
+        '''
         if row.text.startswith('!set_chesscom') or row.text.startswith('!link_chesscom'):
             if len(split) > 1:
                 if exists_chesscom(split[1]):
@@ -1088,51 +872,46 @@ def even_split(df, team_names, iter_time=10, verbose=False):
         ps = ['player', 'substitute']
         if split[0].startswith('!join_rapid_league'):
             if len(split) > 1 and split[1] in ps:
-                LDB.league_join(LDB.get_month(0), row.id, (split[1] == 'player'))
+                LDB.league_join(fgg.get_month(0), row.id, (split[1] == 'player'))
                 if len(split) > 2 and split[2] in ['1', '2', '3', '4']:
-                    LDB.league_join(LDB.get_month(0), row.id,
+                    LDB.league_join(fgg.get_month(0), row.id,
                         (split[1] == 'player'), sub_week=int(split[2]),
                     )
 
         if split[0].startswith('!league_join'):
             if len(split) > 1 and split[1] in ps:
-                LDB.league_join(LDB.get_month(0), row.id, (split[1] == 'player'))
+                LDB.league_join(fgg.get_month(0), row.id, (split[1] == 'player'))
 
         if split[0].startswith('!leave') or split[0].startswith('!league_leave'):
-            LDB.league_leave(LDB.get_month(0), row.id)
+            LDB.league_leave(fgg.get_month(0), row.id)
 
         if split[0].startswith('!league_request_substitute'):
             if len(split) > 1 and split[1] in list('1234'):
-                LDB.request_sub(LDB.get_month(0), int(split[1]), row.id)
-
+                LDB.request_sub(fgg.get_month(0), int(split[1]), row.id)
+        '''
 
     pprint(unique)
     print()
-    LDB.set_team_names(LDB.get_month(0), ['Team Rants', 'Team No Rants'])
-    #LDB.assign_teams(LDB.get_month(0))
-    #LDB.league_leave(LDB.get_month(0), 80632841108463616)
     df_dict = LDB.get_all_tables()
     for name, df in df_dict.items():
         print(df)
         print(name)
         print()
-    LDB.update_signup_info(LDB.get_month(0))
-    print(LDB.get_user_data(841679471789473803))
-    print(LDB.get_user_data(1234))
     raise Exception
-'''
+    #LDB.set_team_names(fgg.get_month(0), ['Team Rants', 'Team No Rants'])
+    #LDB.assign_teams(fgg.get_month(0))
+    #LDB.league_leave(fgg.get_month(0), 80632841108463616)
+
+def backup_databases():
+    pass
 
 if __name__ == '__main__':
+    #read_history()
     LDB = LeagueDatabase()
-    #LDB.reset_teams(LDB.get_month(NEXT_MONTH), assign_sub=True)
-    #LDB.reset_teams(LDB.get_month(NEXT_MONTH), assign_sub=False)
-    #LDB.assign_teams(LDB.get_month(NEXT_MONTH), assign_sub=False)
-    #LDB.assign_teams(LDB.get_month(NEXT_MONTH), assign_sub=True)
-    #LDB.seed_games(LDB.get_month(NEXT_MONTH), 1)
+    season_name = fgg.get_month(NEXT_MONTH)
+    print(LDB.get_games_by_week(season_name, 1))
+    #raise Exception
     '''
-    print(LDB.get_week_games(LDB.get_month(NEXT_MONTH), 1))
-    '''
-    season_name = LDB.get_month(NEXT_MONTH)
     rant_df = LDB.get_team_members(season_name, 'Team Rants', get_subs=False)
     nort_df = LDB.get_team_members(season_name, 'Team No Rants', get_subs=False)
     rant_sub_df = LDB.get_team_members(season_name, 'Team Rants', get_subs=True)
@@ -1145,10 +924,18 @@ if __name__ == '__main__':
     print()
     print(nort_sub_df)
     print()
+    LDB.league_leave(season_name, 878672511783567422)
     '''
     df_dict = LDB.get_all_tables()
     for name, df in df_dict.items():
         print(df)
         print(name)
         print()
+
     '''
+    week_num = 1
+    discord_id = 490529572908171284
+    url = 'https://www.chess.com/analysis/game/live/24460856009?tab=review'
+    LDB.league_set_url(season_name, week_num, discord_id, url)
+    '''
+    #fcc.get_game_history('pawngrubber')
