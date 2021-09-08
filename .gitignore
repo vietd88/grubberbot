@@ -4,3 +4,4 @@
 *.sqlite3
 *.parquet
 *.bz2
+*.pyc
