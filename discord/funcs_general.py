@@ -26,9 +26,13 @@ def get_month(month_delta=0, to_str=True):
         date = date.strftime('%Y%B')
     return date
 
-def gen_thread_name(game_id, month_str, week_str, white_name, black_name):
+def gen_substitute_thread_name(seed_id):
+    name = f's{seed_id} Substitute Request'
+    return name
+
+def gen_pairing_thread_name(game_id, season_name, week_num, white_name, black_name):
     thread_name = (
-        f'g{game_id} {month_str} {week_str} | {white_name} vs {black_name}'
+        f'g{game_id} {season_name} Week{week_num} | {white_name} vs {black_name}'
     )
     return thread_name
 

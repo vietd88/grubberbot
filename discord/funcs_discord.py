@@ -22,6 +22,8 @@ DISCORD_HISTORY_PARQUET = 'data/discord_history.parquet'
 LOG_FILE = 'data/grubberbot.log'
 GRUBBER_MENTION = '<@490529572908171284>'
 GUILD_NAME = "pawngrubber's server"
+ANNOUNCE_SUB_CHANNEL = 'grubberbot-debug'
+ELO_EXTRA = 100
 
 logging.basicConfig(
     filename=LOG_FILE,
@@ -61,6 +63,15 @@ DISPLAY_RESULT = {
 }
 
 LDB = flg.LeagueDatabase()
+
+def get_all_threads(guild):
+    threads = list(guild.threads)
+    threads = threads + [
+        t
+        for c in guild.channels if hasattr(c, 'archived_threads')
+        async for t in c.archived_threads() if 'league' in c.name
+    ]
+    return threads
 
 def gen_chesscom_username_error(mention, user_mention, mod=False):
     if mod:
@@ -114,9 +125,6 @@ def on_command_error(ctx, exception):
     print(datetime.datetime.now(), 'Exception found')
     print(logging_message)
     return message
-
-def request_substitutes():
-    pass
 
 async def test_create_thread(bot, guild):
     channel = discord.utils.get(guild.channels, name='grubberbot-debug')
@@ -341,19 +349,153 @@ async def mod_league_leave_current(ctx, discord_mention: discord.Member):
     message = await league_leave(mention, discord_mention, season_name)
     await ctx.send(message)
 
+async def announce_substitute(mention, team_mention, guild, seed_id, week_num):
+    #guild = ctx.guild
+    channel = discord.utils.get(guild.channels, name=ANNOUNCE_SUB_CHANNEL)
+    title = fgg.gen_substitute_thread_name(seed_id)
+    thread = await channel.create_thread(
+        name=title,
+        type=discord.ChannelType.public_thread,
+        reason='testing-purposes',
+    )
+
+    message = (
+        f'{mention} has requested a substitute on week {week_num}.  '
+        f'Any eligible member of team {team_mention} may play '
+        f'for {mention} by using `!league_claim_substitution {seed_id}` '
+        f'in this thread.  '
+
+    )
+
+    print(title)
+    print(message)
+    await thread.send(message)
+    return thread
+
+async def league_claim_substitute(mention, user, seed_id):
+
+    # Ensure seed_id exists
+    df = LDB.get_claim_sub_from(seed_id)
+    if len(df) == 0:
+        message = (
+            f'{mention} Seed ID `{seed_id}` does not exist'
+        )
+        return message
+
+    team_name = df['team_name'][0]
+    season_name = df['season_name'][0]
+    week_num = df['week_num'][0]
+    chesscom = df['chesscom'][0]
+    rapid_rating = LDB.chess_db.get_rating(chesscom)['rapid']
+    max_elo = rapid_rating + ELO_EXTRA
+
+    # Ensure player is playing this season
+    df = LDB.get_claim_sub_to(season_name, user.id)
+    if len(df) == 0:
+        message = (
+            f'{mention} User {user.mention} is not playing in '
+            f'season `{season_name}`'
+        )
+        return message
+
+    # Ensure the player is on the same team as the one requesting the sub
+    new_team_name = df['team_name'][0]
+    if team_name != new_team_name:
+        message = (
+            f'{mention} Error, user {user.mention} is not on team '
+            f'`{team_name}` but is instead on team `{new_team_name}`'
+        )
+        return message
+
+    # Ensure the player is playing less than 2 games
+    df = LDB.get_games_by_week(season_name, week_num)
+    num_games = len(df)
+    if len(df) >= 2:
+        message = (
+            f'{mention} User {user.mention} is already playing `{len(df)}` '
+            f'games this week'
+        )
+        return message
+
+    # Ensure the player is below ELO_EXTRA
+    new_chesscom = df['chesscom'][0]
+    new_rapid_rating = LDB.chess_db.get_rating(new_chesscom)['rapid']
+    if new_rapid_rating > max_elo:
+        message = (
+            f'{mention} Error, max Elo for this game is `{max_elo}`, but '
+            f'user {user.mention} has a rapid rating of `{new_rapid_rating}`'
+        )
+        return message
+
+    # Do the substitute
+    LDB.update_sub(season_name, seed_id, user.id)
+    df = LDB.get_gameid_from_seedid(seed_id)
+    game_id = df['game_id'][0]
+    white_discord_id = df['white_discord_id'][0]
+    black_discord_id = df['white_discord_id'][0]
+    threads = get_all_threads(ctx.guild)
+    thread = [t for t in threads if t.name.startswith(f'g{game_id}')][0]
+
+    message = (
+        f'Hi! {user.mention} has claimed a substitute for this game.  '
+        f'This game will be played as:\n\n'
+        f'<@{white_discord_id}> will play white\n'
+        f'<@{black_discord_id}> will play black\n\n'
+        f'As always, please use this thread so I can help you.  This thread '
+        f'is for:\n'
+        '* Scheduling your rapid game.  Any conversation outside of this '
+        'thread cannot be regulated by moderators.  '
+        '* Posting your result.  When your game is done please use '
+        '`!league_set_result <url>` (in this thread) where `<url>` is a'
+        f' link to the chess.com game.\n\n'
+        'If you need a substitute please ask in the #league-moderation room.\n\n'
+        'See the pairings online: https://docs.google.com/spreadsheets/d/1SFH7ntDpDW7blX_xBU_m_kSmvY2tLXkuwq-TOM9wyew/edit#gid=2039965781'
+    )
+    await thread.send(message)
+
+    message = (
+        f'{mention} User {user.mention} has successfully claimed a substitute.'
+    )
+    return message
+
+@commands.command(name='league_claim_substitute')
+async def user_league_claim_substitute(ctx, seed_id: int):
+    '''
+        <seed_id> the identifier for the substitution
+    '''
+    user = ctx.message.author
+    mention = user.mention
+    message = await league_request_substitute(mention, user, seed_id)
+    await ctx.send(message)
+
+help_text = '\n'.join([
+])
+@commands.command(name='mod_league_claim_substitute', help=help_text)
+@commands.has_any_role(*MODERATOR_ROLES)
+async def mod_league_claim_substitute(ctx, user: discord.Member, seed_id: int,
+    ):
+    '''
+        <user> use @someone
+        <seed_id> the identifier for the substitution
+    '''
+    mention = ctx.message.author.mention
+    message = await league_request_substitute(mention, user, seed_id)
+    await ctx.send(message)
+
+
 async def league_request_substitute(
         mention,
         user,
         is_next_season,
-        sub_week,
+        week_num,
         mod=False,
     ):
 
     # Verify that sub week is in 1-4
     sub_weeks = list(range(1, 5))
-    if sub_week not in sub_weeks:
+    if week_num not in sub_weeks:
         message = (
-            f'{mention} Expected one of `{sub_weeks}`, instead got `{sub_week}`'
+            f'{mention} Expected one of `{sub_weeks}`, instead got `{week_num}`'
         )
         return message
 
@@ -374,11 +516,26 @@ async def league_request_substitute(
         )
         return message
 
-    LDB.request_sub(season_name, sub_week, user.id)
+    LDB.request_sub(season_name, week_num, user.id)
     message = (
         f'{mention} user {user.mention} has requested a substitute on '
-        f'week {sub_week} of the rapid league `{next_month}` season'
+        f'week {week_num} of the rapid league `{season_name}` season'
     )
+
+    df = LDB.get_sub_announce(season_name, week_num, user.id)
+    if len(df) > 0:
+        seed_id = df['seed_id'][0]
+        team_name = df['team_name'][0]
+        guild = ctx.guild
+        team_mention = discord.utils.get(guild.roles, name=team_name).mention,
+        await announce_substitute(
+            user.mention,
+            team_mention,
+            guild,
+            df['seed_id'][0],
+            week_num,
+        )
+
     return message
 
 @commands.command(name='league_request_sub_this_month')
@@ -680,6 +837,7 @@ def update_google_sheet():
         season_name = fgg.get_month(0)
         df = LDB.get_games_by_week(season_name, week_num)
         to_sheet = df[[
+            'game_id',
             'white_discord_name',
             'white_chesscom',
             'white_rapid_rating',

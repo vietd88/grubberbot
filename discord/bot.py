@@ -29,9 +29,7 @@ MODERATOR_ROLES = [
 # TODO: sql injection problem
 # TODO: @everyone problem
 # TODO: Backup sqlite3 data
-# TODO: what if discord username or chesscom username changes?
 # TODO: !info command
-# TODO: enforce 1:1 discord and chesscom usernames in both directions
 
 '''
 !list_commands
@@ -41,12 +39,6 @@ MODERATOR_ROLES = [
 
 !league_schedule_game <date and time> - schedule a game, somehow i'll require confirmation from both players
 !mod_league_schedule_game <@someone> <date and time> - schedule a game without requiring confirmation
-
-# for substitutes
-!league_request_substitute <this_season, next_season> <1, 2, 3, 4> - on a given week number request a substitute (resign if no substitute)
-!league_claim_substitution - usable only in a thread, replace the player requesting a substitute in the thread
-!mod_league_request_substitute <@someone> <1, 2, 3, 4>
-!mod_league_claim_substitution <@someone>
 '''
 
 # Declare variables
@@ -115,6 +107,8 @@ def main():
     bot.add_command(fdd.user_league_request_sub_this_month)
     bot.add_command(fdd.mod_league_request_sub_next_month)
     bot.add_command(fdd.mod_league_request_sub_this_month)
+    bot.add_command(fdd.user_league_claim_substitute)
+    bot.add_command(fdd.mod_league_claim_substitute)
 
     bot.run(DISCORD_TOKEN)
 
