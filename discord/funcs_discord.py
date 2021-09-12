@@ -64,7 +64,8 @@ DISPLAY_RESULT = {
 
 LDB = flg.LeagueDatabase()
 
-def get_all_threads(guild):
+################ General commands
+async def get_all_threads(guild):
     threads = list(guild.threads)
     threads = threads + [
         t
@@ -73,6 +74,212 @@ def get_all_threads(guild):
     ]
     return threads
 
+async def announce_pairing(bot, guild):
+    season_name = fgg.get_month(0)
+    week_num = 2
+
+    df = LDB.get_games_by_week(season_name, week_num)
+    channel = discord.utils.get(guild.channels, name='league-scheduling')
+
+    rows = [row for row in df.itertuples()]
+    for row in rows:
+        title = fgg.gen_pairing_thread_name(
+            row.game_id,
+            season_name,
+            week_num,
+            row.white_discord_name,
+            row.black_discord_name,
+        )
+        thread = await channel.create_thread(
+            name=title,
+            #message=f'{GRUBBER_MENTION} test123',
+            type=discord.ChannelType.public_thread,
+            reason='testing-purposes',
+        )
+        message = (
+            'Hi! September Rapid League Week 2 has started, please use '
+            'this thread so I can help you.  This thread is for:\n'
+            '* Scheduling your rapid game.  Any conversation outside of this '
+            'thread cannot be regulated by moderators.  You have until '
+            'September 16th 11:59pm ET to schedule your game.\n'
+            '* Posting your result.  When your game is done please use '
+            '`!set_result <url>` (in this thread) where `<url>` is a link to the '
+            'chess.com game.\n\n'
+            'If you need a substitute please ask in the #league-moderation room.\n\n'
+            f'<@{row.white_discord_id}> will play white\n'
+            f'<@{row.black_discord_id}> will play black\n'
+            'See the pairings online: https://docs.google.com/spreadsheets/d/1SFH7ntDpDW7blX_xBU_m_kSmvY2tLXkuwq-TOM9wyew/edit#gid=2039965781'
+        )
+        print(message)
+        await thread.send(message)
+        print(title)
+
+async def announce_substitute(mention, team_mention, guild, seed_id, week_num):
+    #guild = ctx.guild
+    channel = discord.utils.get(guild.channels, name=ANNOUNCE_SUB_CHANNEL)
+    title = fgg.gen_substitute_thread_name(seed_id)
+    thread = await channel.create_thread(
+        name=title,
+        type=discord.ChannelType.public_thread,
+        reason='testing-purposes',
+    )
+
+    message = (
+        f'{mention} has requested a substitute on week {week_num}.  '
+        f'Any eligible member of team {team_mention} may play '
+        f'for {mention} by using `!claim_substitute {seed_id}` '
+        f'in this thread.  '
+
+    )
+
+    print(title)
+    print(message)
+    await thread.send(message)
+    return thread
+
+def save_user_data(guild):
+    members = list(guild.members)
+    df_dict = {
+        'discord_id': [member.id for member in tqdm(members)],
+        'discord_name': [str(member) for member in tqdm(members)],
+    }
+    df = pd.DataFrame(df_dict)
+    df.to_parquet(DISCORD_USERS_PARQUET)
+    print(f'updated {DISCORD_USERS_PARQUET}')
+
+async def save_discord_history(guild):
+    data = {
+        'date': [],
+        'discord_id': [],
+        'name': [],
+        'text': [],
+        'channel': [],
+        'is_thread': [],
+    }
+
+    LIMIT = None
+    channels = [(False, c) for c in guild.channels]
+    threads = [(True, t) for t in guild.threads]
+    threads = threads + [
+        (True, t)
+        for c in guild.channels
+        if hasattr(c, 'archived_threads')
+        async for t in c.archived_threads()
+        if 'league' in c.name
+    ]
+    combined = channels + threads
+    for is_thread, channel in tqdm(combined):
+        print()
+        print(is_thread, channel.name)
+        if hasattr(channel, 'history'):
+            msgs = await channel.history(limit=LIMIT).flatten()
+            for msg in msgs:
+                data['date'].append(msg.created_at)
+                data['discord_id'].append(msg.author.id)
+                data['name'].append(str(msg.author))
+                data['text'].append(msg.content)
+                data['channel'].append(channel.name)
+                data['is_thread'].append(is_thread)
+
+    df = pd.DataFrame(data)
+    df.to_parquet(DISCORD_HISTORY_PARQUET)
+    print(f'updated {DISCORD_HISTORY_PARQUET}')
+
+def update_google_sheet():
+    # Sign-up info
+    season_name = fgg.get_month()
+    df = LDB.update_signup_info(season_name)
+    fgg.df_to_sheet(df, sheet=0, title=season_name)
+
+    # Standings
+    df = LDB.get_season_games(season_name)
+    teams = list(df['white_team_name']) + list(df['black_team_name'])
+    teams = set(teams)
+    result_dict = {1: 3, 0: 1, -1: 0}
+    white_dict = [
+        {
+            'score': result_dict[row.result],
+            'team': row.white_team_name,
+            'rapid_rating': row.white_rapid_rating,
+            'discord_name': row.white_discord_name,
+            'chesscom': row.white_chesscom,
+        }
+        for row in df.itertuples()
+    ]
+    black_dict = [
+        {
+            'score': result_dict[row.result * (-1)],
+            'team': row.black_team_name,
+            'rapid_rating': row.black_rapid_rating,
+            'discord_name': row.black_discord_name,
+            'chesscom': row.black_chesscom,
+        }
+        for row in df.itertuples()
+    ]
+    seeds = white_dict + black_dict
+    members = {team: [] for team in teams}
+    for seed in seeds:
+        key = (seed['discord_name'], seed['chesscom'], seed['rapid_rating'])
+        members[seed['team']].append(key)
+    members = {k: {m: 0 for m in list(set(v))} for k, v in members.items()}
+    for seed in seeds:
+        key = (seed['discord_name'], seed['chesscom'], seed['rapid_rating'])
+        members[seed['team']][key] += seed['score']
+
+    members = {
+        t: sorted([[u[0], u[1], u[2], s, ''] for u, s in m.items()], key=lambda x: x[2])
+        for t, m in members.items()
+    }
+    for team in teams:
+        points = sum(row[3] for row in members[team])
+        val = [['', '', '', points, ''], ['', '', '', '', '']]
+        members[team] = val + members[team]
+
+    cols = [[
+        e for team in teams for e in
+        [team, 'Chesscom', 'Rapid Elo', 'Points', '']
+    ]]
+    max_length = max(len(v) for k, v in members.items())
+    for k in members.keys():
+        while len(members[k]) < max_length:
+            members[k].append(['', '', '', ''])
+    arr = []
+    for i in range(max_length):
+        arr.append([])
+        for team in teams:
+            row = members[team][i]
+            arr[i] = arr[i] + members[team][i]
+    arr = cols + arr
+    fgg.arr_to_sheet(arr, sheet=1)
+
+    # Pairings
+    for week_num in [1, 2, 3, 4]:
+        season_name = fgg.get_month(0)
+        df = LDB.get_games_by_week(season_name, week_num)
+        to_sheet = df[[
+            'game_id',
+            'white_discord_name',
+            'white_chesscom',
+            'white_rapid_rating',
+            'black_rapid_rating',
+            'black_chesscom',
+            'black_discord_name',
+            'schedule',
+            'result',
+            'url',
+        ]]
+        to_sheet['result'] = [
+            DISPLAY_RESULT[r] if r in DISPLAY_RESULT else '-'
+            for r in np.array(to_sheet['result'])
+        ]
+        fgg.df_to_sheet(to_sheet, sheet=week_num+1)
+
+    # Next season sign-up info
+    season_name = fgg.get_month(1)
+    df = LDB.update_signup_info(season_name)
+    fgg.df_to_sheet(df, sheet=6, title=season_name)
+
+################ Exception handling
 def gen_chesscom_username_error(mention, user_mention, mod=False):
     if mod:
         error_command = '!mod_set_chesscom'
@@ -126,50 +333,8 @@ def on_command_error(ctx, exception):
     print(logging_message)
     return message
 
-async def test_create_thread(bot, guild):
-    channel = discord.utils.get(guild.channels, name='grubberbot-debug')
-    thread = await channel.create_thread(
-        name='grubberbot-test-thread',
-        #message='test123',
-        type=discord.ChannelType.public_thread,
-        reason='testing-purposes',
-    )
-    await thread.send('test message')
-    print('thread created')
-
-async def announce_pairing(bot, guild):
-    df = LDB.get_games_by_week(fgg.get_month(flg.NEXT_MONTH), 1)
-    channel = discord.utils.get(guild.channels, name='league-scheduling')
-
-    rows = [row for row in df.itertuples()]
-    for row in rows[-1:]:
-        title = f'Sep2021 Week1 {row.white_discord_name} vs {row.black_discord_name}'
-        thread = await channel.create_thread(
-            name=title,
-            #message=f'{GRUBBER_MENTION} test123',
-            type=discord.ChannelType.public_thread,
-            reason='testing-purposes',
-        )
-        message = (
-            'Hi! September Rapid League Week 1 has started, please use '
-            'this thread so I can help you.  This thread is for:\n'
-            '* Scheduling your rapid game.  Any conversation outside of this '
-            'thread cannot be regulated by moderators.  You have until '
-            'September 9th 11:59pm ET to schedule your game.\n'
-            '* Posting your result.  When your game is done please use '
-            '`!league_set_result <url>` (in this thread) where `<url>` is a link to the '
-            'chess.com game.\n\n'
-            'If you need a substitute please ask in the #league-moderation room.\n\n'
-            f'<@{row.white_discord_id}> will play white\n'
-            f'<@{row.black_discord_id}> will play black\n'
-            'See the pairings online: https://docs.google.com/spreadsheets/d/1SFH7ntDpDW7blX_xBU_m_kSmvY2tLXkuwq-TOM9wyew/edit#gid=2039965781'
-        )
-        print(message)
-        await thread.send(message)
-        print(title)
-
-async def set_chesscom(mention, user, chesscom):
-    LDB.update_signup_info(fgg.get_month(flg.NEXT_MONTH))
+######################## Define league membership commands
+async def general_set_chesscom(mention, user, chesscom):
     if not LDB.chess_db.get_exists(chesscom):
         message = f'{mention} Chess.com username not found: `{chesscom}`'
         return message
@@ -186,7 +351,6 @@ async def set_chesscom(mention, user, chesscom):
             f'{mention} user {user.mention} was linked to Chess.com username '
             f'`{user_data["chesscom"][0]}` but is now linked to `{chesscom}`'
         )
-    LDB.update_signup_info(fgg.get_month(flg.NEXT_MONTH))
     return message
 
 @commands.command(name='set_chesscom')
@@ -194,34 +358,26 @@ async def user_set_chesscom(ctx, chesscom: str):
     '''Link your chess.com account to your discord account'''
     user = ctx.message.author
     mention = user.mention
-    message = await set_chesscom(mention, user, chesscom)
+    message = await general_set_chesscom(mention, user, chesscom)
     await ctx.send(message)
 
 @commands.command(name='mod_set_chesscom')
 @commands.has_any_role(*MODERATOR_ROLES)
 async def mod_set_chesscom(ctx, discord_mention: discord.Member, chesscom: str):
-    '''Link a chess.com account to your discord account'''
+    '''Link a chess.com account to a discord account'''
     mention = ctx.message.author.mention
-    message = await set_chesscom(mention, discord_mention, chesscom)
+    message = await general_set_chesscom(mention, discord_mention, chesscom)
     await ctx.send(message)
 
-async def league_join(mention, user, season_name, join_type, mod=False):
-    if mod:
-        fn_name = 'mod_league_join'
-    else:
-        fn_name = 'league_join'
-    general_error_message = flg.GENERAL_ERROR_MESSAGE.format(
-        mention, fn_name, fn_name)
+async def general_join(mention, user, season_name, join_type, mod=False):
+    join_error_message = f'{mention} Errors:'
 
     user_data = LDB.get_user_data(user.id)
     player_args = ['player', 'substitute']
 
     errors = []
     if len(user_data) < 1:
-        if mod:
-            errors.append(f'Chess.com not yet linked, use `!mod_set_chesscom`')
-        else:
-            errors.append(f'Chess.com not yet linked, use `!set_chesscom`')
+        errors.append(gen_chesscom_username_error(mention, user.mention, mod))
     else:
         chesscom = user_data['chesscom'][0]
         count_info = LDB.chess_db.get_count(chesscom)
@@ -242,7 +398,7 @@ async def league_join(mention, user, season_name, join_type, mod=False):
 
     if errors:
         errors = ['* ' + e for e in errors]
-        errors = [general_error_message] + errors
+        errors = [join_error_message] + errors
         message = '\n'.join(errors)
     else:
         LDB.league_join(
@@ -257,48 +413,63 @@ async def league_join(mention, user, season_name, join_type, mod=False):
         ])
     return message
 
-@commands.command(name='league_join_current')
-async def user_league_join_current(ctx):
+@commands.command(name='join_current')
+async def user_join_current(ctx):
     '''Join the current season of the rapid league as a substitute'''
     user = ctx.message.author
     mention = user.mention
     season_name = fgg.get_month(0)
-    message = await league_join(mention, user, season_name, 'substitute')
+    message = await general_join(mention, user, season_name, 'substitute')
     await ctx.send(message)
 
-@commands.command(name='mod_league_join_current')
+@commands.command(name='mod_join_current')
 @commands.has_any_role(*MODERATOR_ROLES)
-async def mod_league_join_current(ctx, user: discord.Member, join_type: str):
+async def mod_join_current(ctx, user: discord.Member, join_type: str):
     '''Add someone to the current season of the rapid league
         <user> Ping someone with @user'
         <join_type>: either "player" or "substitute"'''
     mention = ctx.message.author.mention
     season_name = fgg.get_month(0)
-    message = await league_join(mention, user, season_name, join_type, mod=True)
+    message = await general_join(mention, user, season_name, join_type, mod=True)
     await ctx.send(message)
 
-@commands.command(name='league_join')
-async def user_league_join(ctx, join_type: str):
-    '''Join the next season of the rapid league as a player or a substitute,
-        <join_type>: either "player" or "substitute"'''
+@commands.command(name='join_player')
+async def user_join_player(ctx):
+    '''Join the next season of the rapid league as a player'''
     user = ctx.message.author
     mention = user.mention
     season_name = fgg.get_month(1)
-    message = await league_join(mention, user, season_name, join_type)
+    message = await general_join(mention, user, season_name, 'player')
     await ctx.send(message)
 
-@commands.command(name='mod_league_join')
+@commands.command(name='mod_join_player')
 @commands.has_any_role(*MODERATOR_ROLES)
-async def mod_league_join(ctx, user: discord.Member, join_type: str):
-    '''Add someone to the next season of the rapid league
-        <user> Ping someone with @user'
-        <join_type>: either "player" or "substitute"'''
+async def mod_join_player(ctx, user: discord.Member):
+    '''Add someone to the next season of the rapid league as a player'''
     mention = ctx.message.author.mention
     season_name = fgg.get_month(1)
-    message = await league_join(mention, user, season_name, join_type, mod=True)
+    message = await general_join(mention, user, season_name, 'player', mod=True)
     await ctx.send(message)
 
-async def league_leave(mention, user, season_name):
+@commands.command(name='join_substitute')
+async def user_join_substitute(ctx):
+    '''Join the next season of the rapid league as a substitute'''
+    user = ctx.message.author
+    mention = user.mention
+    season_name = fgg.get_month(1)
+    message = await general_join(mention, user, season_name, 'substitute')
+    await ctx.send(message)
+
+@commands.command(name='mod_join_substitute')
+@commands.has_any_role(*MODERATOR_ROLES)
+async def mod_join_substitute(ctx, user: discord.Member, join_type: str):
+    '''Add someone to the next season of the rapid league as a substitute'''
+    mention = ctx.message.author.mention
+    season_name = fgg.get_month(1)
+    message = await general_join(mention, user, season_name, 'substitute', mod=True)
+    await ctx.send(message)
+
+async def general_leave(mention, user, season_name):
     df = LDB.get_league_info(season_name, user.id)
     if len(df) == 0:
         message = (
@@ -313,315 +484,46 @@ async def league_leave(mention, user, season_name):
         )
     return message
 
-@commands.command(name='league_leave')
-async def user_league_leave(ctx):
+@commands.command(name='leave_next')
+async def user_leave_next(ctx):
     '''To leave the upcoming rapid league season'''
     user = ctx.message.author
     mention = user.mention
     season_name = fgg.get_month(1)
-    message = await league_leave(mention, user, season_name)
+    message = await general_leave(mention, user, season_name)
     await ctx.send(message)
 
-@commands.command(name='mod_league_leave')
+@commands.command(name='mod_leave_next')
 @commands.has_any_role(*MODERATOR_ROLES)
-async def mod_league_leave(ctx, discord_mention: discord.Member):
+async def mod_leave_next(ctx, discord_mention: discord.Member):
     '''Remove user from upcoming league'''
     mention = ctx.message.author.mention
     season_name = fgg.get_month(1)
-    message = await league_leave(mention, discord_mention, season_name)
+    message = await general_leave(mention, discord_mention, season_name)
     await ctx.send(message)
 
-@commands.command(name='league_leave_current')
-async def user_league_leave_current(ctx):
+@commands.command(name='leave_current')
+async def user_leave_current(ctx):
     '''To leave the current rapid league season'''
     user = ctx.message.author
     mention = user.mention
     season_name = fgg.get_month(0)
-    message = await league_leave(mention, user, season_name)
+    message = await general_leave(mention, user, season_name)
     await ctx.send(message)
 
-@commands.command(name='mod_league_leave_current')
+@commands.command(name='mod_leave_current')
 @commands.has_any_role(*MODERATOR_ROLES)
-async def mod_league_leave_current(ctx, discord_mention: discord.Member):
+async def mod_leave_current(ctx, discord_mention: discord.Member):
     '''Remove user from current league'''
     mention = ctx.message.author.mention
     season_name = fgg.get_month(0)
-    message = await league_leave(mention, discord_mention, season_name)
+    message = await general_leave(mention, discord_mention, season_name)
     await ctx.send(message)
 
-async def announce_substitute(mention, team_mention, guild, seed_id, week_num):
-    #guild = ctx.guild
-    channel = discord.utils.get(guild.channels, name=ANNOUNCE_SUB_CHANNEL)
-    title = fgg.gen_substitute_thread_name(seed_id)
-    thread = await channel.create_thread(
-        name=title,
-        type=discord.ChannelType.public_thread,
-        reason='testing-purposes',
-    )
+######################### Define commands for setting results
+def general_set_result(mention, user, game_id, url=None, mod=False, result=None):
 
-    message = (
-        f'{mention} has requested a substitute on week {week_num}.  '
-        f'Any eligible member of team {team_mention} may play '
-        f'for {mention} by using `!league_claim_substitution {seed_id}` '
-        f'in this thread.  '
-
-    )
-
-    print(title)
-    print(message)
-    await thread.send(message)
-    return thread
-
-async def league_claim_substitute(mention, user, seed_id):
-
-    # Ensure seed_id exists
-    df = LDB.get_claim_sub_from(seed_id)
-    if len(df) == 0:
-        message = (
-            f'{mention} Seed ID `{seed_id}` does not exist'
-        )
-        return message
-
-    team_name = df['team_name'][0]
-    season_name = df['season_name'][0]
-    week_num = df['week_num'][0]
-    chesscom = df['chesscom'][0]
-    rapid_rating = LDB.chess_db.get_rating(chesscom)['rapid']
-    max_elo = rapid_rating + ELO_EXTRA
-
-    # Ensure player is playing this season
-    df = LDB.get_claim_sub_to(season_name, user.id)
-    if len(df) == 0:
-        message = (
-            f'{mention} User {user.mention} is not playing in '
-            f'season `{season_name}`'
-        )
-        return message
-
-    # Ensure the player is on the same team as the one requesting the sub
-    new_team_name = df['team_name'][0]
-    if team_name != new_team_name:
-        message = (
-            f'{mention} Error, user {user.mention} is not on team '
-            f'`{team_name}` but is instead on team `{new_team_name}`'
-        )
-        return message
-
-    # Ensure the player is playing less than 2 games
-    df = LDB.get_games_by_week(season_name, week_num)
-    num_games = len(df)
-    if len(df) >= 2:
-        message = (
-            f'{mention} User {user.mention} is already playing `{len(df)}` '
-            f'games this week'
-        )
-        return message
-
-    # Ensure the player is below ELO_EXTRA
-    new_chesscom = df['chesscom'][0]
-    new_rapid_rating = LDB.chess_db.get_rating(new_chesscom)['rapid']
-    if new_rapid_rating > max_elo:
-        message = (
-            f'{mention} Error, max Elo for this game is `{max_elo}`, but '
-            f'user {user.mention} has a rapid rating of `{new_rapid_rating}`'
-        )
-        return message
-
-    # Do the substitute
-    LDB.update_sub(season_name, seed_id, user.id)
-    df = LDB.get_gameid_from_seedid(seed_id)
-    game_id = df['game_id'][0]
-    white_discord_id = df['white_discord_id'][0]
-    black_discord_id = df['white_discord_id'][0]
-    threads = get_all_threads(ctx.guild)
-    thread = [t for t in threads if t.name.startswith(f'g{game_id}')][0]
-
-    message = (
-        f'Hi! {user.mention} has claimed a substitute for this game.  '
-        f'This game will be played as:\n\n'
-        f'<@{white_discord_id}> will play white\n'
-        f'<@{black_discord_id}> will play black\n\n'
-        f'As always, please use this thread so I can help you.  This thread '
-        f'is for:\n'
-        '* Scheduling your rapid game.  Any conversation outside of this '
-        'thread cannot be regulated by moderators.  '
-        '* Posting your result.  When your game is done please use '
-        '`!league_set_result <url>` (in this thread) where `<url>` is a'
-        f' link to the chess.com game.\n\n'
-        'If you need a substitute please ask in the #league-moderation room.\n\n'
-        'See the pairings online: https://docs.google.com/spreadsheets/d/1SFH7ntDpDW7blX_xBU_m_kSmvY2tLXkuwq-TOM9wyew/edit#gid=2039965781'
-    )
-    await thread.send(message)
-
-    message = (
-        f'{mention} User {user.mention} has successfully claimed a substitute.'
-    )
-    return message
-
-@commands.command(name='league_claim_substitute')
-async def user_league_claim_substitute(ctx, seed_id: int):
-    '''
-        <seed_id> the identifier for the substitution
-    '''
-    user = ctx.message.author
-    mention = user.mention
-    message = await league_request_substitute(mention, user, seed_id)
-    await ctx.send(message)
-
-help_text = '\n'.join([
-])
-@commands.command(name='mod_league_claim_substitute', help=help_text)
-@commands.has_any_role(*MODERATOR_ROLES)
-async def mod_league_claim_substitute(ctx, user: discord.Member, seed_id: int,
-    ):
-    '''
-        <user> use @someone
-        <seed_id> the identifier for the substitution
-    '''
-    mention = ctx.message.author.mention
-    message = await league_request_substitute(mention, user, seed_id)
-    await ctx.send(message)
-
-
-async def league_request_substitute(
-        mention,
-        user,
-        is_next_season,
-        week_num,
-        mod=False,
-    ):
-
-    # Verify that sub week is in 1-4
-    sub_weeks = list(range(1, 5))
-    if week_num not in sub_weeks:
-        message = (
-            f'{mention} Expected one of `{sub_weeks}`, instead got `{week_num}`'
-        )
-        return message
-
-    # Get user chesscom
-    user_data = LDB.get_user_data(user.id)
-    if len(user_data) == 0:
-        message = gen_chesscom_username_error(mention, user_mention, mod=False)
-        return message
-    chesscom = user_data['chesscom'][0]
-
-    # Verify that the user is signed up for the season
-    season_name = fgg.get_month(int(is_next_season))
-    df = LDB.get_league_info(season_name, user.id)
-    if len(df) == 0:
-        message = (
-            f'{mention} User {user.mention} is not signed up for '
-            f'the Rapid League `{season_name}` season'
-        )
-        return message
-
-    LDB.request_sub(season_name, week_num, user.id)
-    message = (
-        f'{mention} user {user.mention} has requested a substitute on '
-        f'week {week_num} of the rapid league `{season_name}` season'
-    )
-
-    df = LDB.get_sub_announce(season_name, week_num, user.id)
-    if len(df) > 0:
-        seed_id = df['seed_id'][0]
-        team_name = df['team_name'][0]
-        guild = ctx.guild
-        team_mention = discord.utils.get(guild.roles, name=team_name).mention,
-        await announce_substitute(
-            user.mention,
-            team_mention,
-            guild,
-            df['seed_id'][0],
-            week_num,
-        )
-
-    return message
-
-@commands.command(name='league_request_sub_this_month')
-async def user_league_request_sub_this_month(ctx, sub_week: int):
-    '''
-        <sub_week> one of `1, 2, 3, 4` for the week you want a substitute
-    '''
-    user = ctx.message.author
-    mention = user.mention
-    message = await league_request_substitute(mention, user, False, sub_week)
-    await ctx.send(message)
-
-help_text = '\n'.join([
-])
-@commands.command(name='mod_league_request_sub_this_month', help=help_text)
-@commands.has_any_role(*MODERATOR_ROLES)
-async def mod_league_request_sub_this_month(
-        ctx,
-        user: discord.Member,
-        sub_week: int,
-    ):
-    '''
-        <user> use @someone
-        <sub_week> one of `1, 2, 3, 4` for the week you want a substitute
-    '''
-    mention = ctx.message.author.mention
-    message = await league_request_substitute(
-        mention, user, False, sub_week, mod=True)
-    await ctx.send(message)
-
-@commands.command(name='league_request_sub_next_month')
-async def user_league_request_sub_next_month(ctx, sub_week: int):
-    '''
-        <sub_week> one of `1, 2, 3, 4` for the week you want a substitute
-    '''
-    user = ctx.message.author
-    mention = user.mention
-    message = await league_request_substitute(mention, user, True, sub_week)
-    await ctx.send(message)
-
-help_text = '\n'.join([
-])
-@commands.command(name='mod_league_request_sub_next_month', help=help_text)
-@commands.has_any_role(*MODERATOR_ROLES)
-async def mod_league_request_sub_next_month(
-        ctx,
-        user: discord.Member,
-        sub_week: int,
-        ):
-    '''
-        <user> use @someone
-        <sub_week> one of `1, 2, 3, 4` for the week you want a substitute
-    '''
-    mention = ctx.message.author.mention
-    message = await league_request_substitute(
-        mention, user, True, sub_week, mod=True)
-    await ctx.send(message)
-
-@commands.command(name='league_info')
-async def league_info(ctx, discord_mention: Optional[discord.Member]=None):
-    '''Get league info, optionally @mention someone to get info about them'''
-    df = LDB.update_signup_info(fgg.get_month(flg.NEXT_MONTH))
-    mention = ctx.message.author.mention
-    user = discord_mention
-
-    next_month = fgg.get_month(flg.NEXT_MONTH)
-    if discord_mention is None:
-        message = '\n'.join([
-            f'{mention} ',
-            f'* Number of members in the {next_month} season: {len(df)}',
-        ])
-    else:
-        df = LDB.get_league_info(fgg.get_month(1), user.id)
-        if len(df) == 0:
-            message = f'{mention} user {user.mention} is not signed up for the league {next_month} season'
-        else:
-            info = {str(c): df[c][0] for c in df.columns}
-            message = '\n'.join([
-                f'{mention} the user {user.mention} has:',
-                pformat(info),
-            ])
-
-    await ctx.send(message)
-
-def league_set_result(mention, user, game_id, url=None, mod=False, result=None):
-
+    # Mods bypass everything
     if mod and url is None:
         if result not in [-1, 0, 1]:
             message = (f'Result must be in `{[-1, 0, 1]}`')
@@ -712,26 +614,11 @@ def league_set_result(mention, user, game_id, url=None, mod=False, result=None):
     return message
 
 def title_to_game_id(title):
-    season_name = fgg.get_month(flg.NEXT_MONTH)
-    df = LDB.get_games_by_week(season_name, 1)
-
-    id_dict = {
-        (
-            row.white_discord_name.replace('#', ''),
-            row.black_discord_name.replace('#', ''),
-        ): row.game_id for row in df.itertuples()
-    }
-
-    split = title.replace('Sep2021 Week1 ', '').split(' vs ')
-
-    white_name = split[0]
-    black_name = split[1]
-    key = (white_name, black_name)
-    game_id = id_dict[key]
+    game_id = int(title.split(' ')[0][1:])
     return game_id
 
-@commands.command(name='user_league_set_result')
-async def user_league_set_result(ctx, url):
+@commands.command(name='user_set_result')
+async def user_set_result(ctx, url):
     '''Use with the game url in a game thread to assign a result to the game'''
     user = ctx.message.author
     mention = ctx.message.author.mention
@@ -740,12 +627,12 @@ async def user_league_set_result(ctx, url):
         message = 'This command must be used in a game thread'
     else:
         game_id = title_to_game_id(ctx.message.channel.name)
-        message = league_set_result(mention, user, game_id, url)
+        message = general_set_result(mention, user, game_id, url)
     await ctx.send(message)
 
-@commands.command(name='mod_league_set_result')
+@commands.command(name='mod_set_result')
 @commands.has_any_role(*MODERATOR_ROLES)
-async def mod_league_set_result(ctx, user: discord.Member, url: str):
+async def mod_set_result(ctx, user: discord.Member, url: str):
     '''Use with the game url in a game thread to assign a result to the game'''
     mention = ctx.message.author.mention
 
@@ -753,12 +640,12 @@ async def mod_league_set_result(ctx, user: discord.Member, url: str):
         message = 'This command must be used in a game thread'
     else:
         game_id = title_to_game_id(ctx.message.channel.name)
-        message = league_set_result(mention, user, game_id, url, mod=True)
+        message = general_set_result(mention, user, game_id, url, mod=True)
     await ctx.send(message)
 
-@commands.command(name='mod_league_custom_result')
+@commands.command(name='mod_custom_result')
 @commands.has_any_role(*MODERATOR_ROLES)
-async def mod_league_custom_result(
+async def mod_custom_result(
         ctx,
         user: discord.Member,
         result: int,
@@ -773,86 +660,260 @@ async def mod_league_custom_result(
         message = 'This command must be used in a game thread'
     else:
         game_id = title_to_game_id(ctx.message.channel.name)
-        message = league_set_result(mention, user, game_id, result=result, mod=True, url=url)
+        message = general_set_result(mention, user, game_id, result=result, mod=True, url=url)
     await ctx.send(message)
 
-# For testing
+######################## Define league substitution commands
+async def general_claim_substitute(mention, user, seed_id):
+
+    # Ensure seed_id exists
+    df = LDB.get_claim_sub_from(seed_id)
+    if len(df) == 0:
+        message = (
+            f'{mention} Seed ID `{seed_id}` does not exist'
+        )
+        return message
+
+    team_name = df['team_name'][0]
+    season_name = df['season_name'][0]
+    week_num = df['week_num'][0]
+    chesscom = df['chesscom'][0]
+    rapid_rating = LDB.chess_db.get_rating(chesscom)['rapid']
+    max_elo = rapid_rating + ELO_EXTRA
+
+    # Ensure player is playing this season
+    df = LDB.get_claim_sub_to(season_name, user.id)
+    if len(df) == 0:
+        message = (
+            f'{mention} User {user.mention} is not playing in '
+            f'season `{season_name}`'
+        )
+        return message
+
+    # Ensure the player is on the same team as the one requesting the sub
+    new_team_name = df['team_name'][0]
+    if team_name != new_team_name:
+        message = (
+            f'{mention} Error, user {user.mention} is not on team '
+            f'`{team_name}` but is instead on team `{new_team_name}`'
+        )
+        return message
+
+    # Ensure the player is playing less than 2 games
+    df = LDB.get_games_by_week(season_name, week_num)
+    num_games = len(df)
+    if len(df) >= 2:
+        message = (
+            f'{mention} User {user.mention} is already playing `{len(df)}` '
+            f'games this week'
+        )
+        return message
+
+    # Ensure the player is below ELO_EXTRA
+    new_chesscom = df['chesscom'][0]
+    new_rapid_rating = LDB.chess_db.get_rating(new_chesscom)['rapid']
+    if new_rapid_rating > max_elo:
+        message = (
+            f'{mention} Error, max Elo for this game is `{max_elo}`, but '
+            f'user {user.mention} has a rapid rating of `{new_rapid_rating}`'
+        )
+        return message
+
+    # Do the substitute
+    LDB.update_sub(season_name, seed_id, user.id)
+    df = LDB.get_gameid_from_seedid(seed_id)
+    game_id = df['game_id'][0]
+    white_discord_id = df['white_discord_id'][0]
+    black_discord_id = df['white_discord_id'][0]
+    threads = await get_all_threads(ctx.guild)
+    thread = [t for t in threads if t.name.startswith(f'g{game_id}')][0]
+
+    message = (
+        f'Hi! {user.mention} has claimed a substitute for this game.  '
+        f'This game will be played where:\n\n'
+        f'<@{white_discord_id}> will play white\n'
+        f'<@{black_discord_id}> will play black\n\n'
+        f'As always, please use this thread so I can help you.  If you '
+        f'need a substitute, please ask in the #league-moderation '
+        f'room.  This thread is for:\n'
+        '* Scheduling your rapid game.  Any conversation outside of this '
+        'thread cannot be regulated by moderators.  '
+        '* Posting your result.  When your game is done please use '
+        '`!set_result <url>` (in this thread) where `<url>` is a'
+        f' link to the chess.com game.\n\n'
+        'See the pairings online: https://docs.google.com/spreadsheets/d/1SFH7ntDpDW7blX_xBU_m_kSmvY2tLXkuwq-TOM9wyew/edit#gid=2039965781'
+    )
+    await thread.send(message)
+
+    message = (
+        f'{mention} User {user.mention} has successfully claimed a substitute.'
+    )
+    return message
+
+@commands.command(name='claim_substitute')
+async def user_claim_substitute(ctx, seed_id: int):
+    '''
+        <seed_id> the identifier for the substitution
+    '''
+    user = ctx.message.author
+    mention = user.mention
+    message = await general_claim_substitute(mention, user, seed_id)
+    await ctx.send(message)
+
+help_text = '\n'.join([
+])
+@commands.command(name='mod_claim_substitute', help=help_text)
+@commands.has_any_role(*MODERATOR_ROLES)
+async def mod_claim_substitute(ctx, user: discord.Member, seed_id: int):
+    '''
+        <user> use @someone
+        <seed_id> the identifier for the substitution
+    '''
+    mention = ctx.message.author.mention
+    message = await general_claim_substitute(mention, user, seed_id)
+    await ctx.send(message)
+
+async def general_request_substitute(
+        mention,
+        user,
+        is_next_season,
+        week_num,
+        mod=False,
+    ):
+
+    # Verify that sub week is in 1-4
+    sub_weeks = list(range(1, 5))
+    if week_num not in sub_weeks:
+        message = (
+            f'{mention} Expected one of `{sub_weeks}`, instead got `{week_num}`'
+        )
+        return message
+
+    # Get user chesscom
+    user_data = LDB.get_user_data(user.id)
+    if len(user_data) == 0:
+        message = gen_chesscom_username_error(mention, user_mention, mod=False)
+        return message
+    chesscom = user_data['chesscom'][0]
+
+    # Verify that the user is signed up for the season
+    season_name = fgg.get_month(int(is_next_season))
+    df = LDB.get_league_info(season_name, user.id)
+    if len(df) == 0:
+        message = (
+            f'{mention} User {user.mention} is not signed up for '
+            f'the Rapid League `{season_name}` season'
+        )
+        return message
+
+    LDB.request_sub(season_name, week_num, user.id)
+    message = (
+        f'{mention} user {user.mention} has requested a substitute on '
+        f'week {week_num} of the rapid league `{season_name}` season'
+    )
+
+    df = LDB.get_sub_announce(season_name, week_num, user.id)
+    if len(df) > 0:
+        seed_id = df['seed_id'][0]
+        team_name = df['team_name'][0]
+        guild = ctx.guild
+        team_mention = discord.utils.get(guild.roles, name=team_name).mention,
+        await announce_substitute(
+            user.mention,
+            team_mention,
+            guild,
+            df['seed_id'][0],
+            week_num,
+        )
+
+    return message
+
+@commands.command(name='request_substitute_current')
+async def user_request_substitute_current(ctx, sub_week: int):
+    '''
+        <sub_week> one of `1, 2, 3, 4` for the week you want a substitute
+    '''
+    user = ctx.message.author
+    mention = user.mention
+    message = await general_request_substitute(mention, user, False, sub_week)
+    await ctx.send(message)
+
+help_text = '\n'.join([
+])
+@commands.command(name='mod_request_substitute_current', help=help_text)
+@commands.has_any_role(*MODERATOR_ROLES)
+async def mod_request_substitute_current(
+        ctx,
+        user: discord.Member,
+        sub_week: int,
+    ):
+    '''
+        <user> use @someone
+        <sub_week> one of `1, 2, 3, 4` for the week you want a substitute
+    '''
+    mention = ctx.message.author.mention
+    message = await general_request_substitute(
+        mention, user, False, sub_week, mod=True)
+    await ctx.send(message)
+
+@commands.command(name='request_substitute_next')
+async def user_request_substitute_next(ctx, sub_week: int):
+    '''
+        <sub_week> one of `1, 2, 3, 4` for the week you want a substitute
+    '''
+    user = ctx.message.author
+    mention = user.mention
+    message = await general_request_substitute(mention, user, True, sub_week)
+    await ctx.send(message)
+
+help_text = '\n'.join([
+])
+@commands.command(name='mod_request_substitute_next', help=help_text)
+@commands.has_any_role(*MODERATOR_ROLES)
+async def mod_request_substitute_next(
+        ctx,
+        user: discord.Member,
+        sub_week: int,
+        ):
+    '''
+        <user> use @someone
+        <sub_week> one of `1, 2, 3, 4` for the week you want a substitute
+    '''
+    mention = ctx.message.author.mention
+    message = await general_request_substitute(
+        mention, user, True, sub_week, mod=True)
+    await ctx.send(message)
+
+############################### Other commands
 @commands.command(name='test')
 async def test(ctx):
     '''A test message to make sure GrubberBot is working'''
     await ctx.send('test successful')
 
-def save_user_data(guild):
-    members = list(guild.members)
-    df_dict = {
-        'discord_id': [member.id for member in tqdm(members)],
-        'discord_name': [str(member) for member in tqdm(members)],
-    }
-    df = pd.DataFrame(df_dict)
-    df.to_parquet(DISCORD_USERS_PARQUET)
-    print(f'updated {DISCORD_USERS_PARQUET}')
+@commands.command(name='league_info')
+async def league_info(ctx, discord_mention: Optional[discord.Member]=None):
+    '''Get league info, optionally @mention someone to get info about them'''
+    mention = ctx.message.author.mention
+    user = discord_mention
 
-async def save_discord_history(guild):
-    data = {
-        'date': [],
-        'discord_id': [],
-        'name': [],
-        'text': [],
-        'channel': [],
-        'is_thread': [],
-    }
+    next_month = fgg.get_month(flg.NEXT_MONTH)
+    if discord_mention is None:
+        message = '\n'.join([
+            f'{mention} ',
+            f'* Number of members in the {next_month} season: {len(df)}',
+        ])
+    else:
+        df = LDB.get_league_info(fgg.get_month(1), user.id)
+        if len(df) == 0:
+            message = f'{mention} user {user.mention} is not signed up for the league {next_month} season'
+        else:
+            info = {str(c): df[c][0] for c in df.columns}
+            message = '\n'.join([
+                f'{mention} the user {user.mention} has:',
+                pformat(info),
+            ])
 
-    LIMIT = None
-    channels = [(False, c) for c in guild.channels]
-    threads = [(True, t) for t in guild.threads]
-    threads = threads + [
-        (True, t)
-        for c in guild.channels
-        if hasattr(c, 'archived_threads')
-        async for t in c.archived_threads()
-        if 'league' in c.name
-    ]
-    combined = channels + threads
-    for is_thread, channel in tqdm(combined):
-        print()
-        print(is_thread, channel.name)
-        if hasattr(channel, 'history'):
-            msgs = await channel.history(limit=LIMIT).flatten()
-            for msg in msgs:
-                data['date'].append(msg.created_at)
-                data['discord_id'].append(msg.author.id)
-                data['name'].append(str(msg.author))
-                data['text'].append(msg.content)
-                data['channel'].append(channel.name)
-                data['is_thread'].append(is_thread)
-
-    df = pd.DataFrame(data)
-    df.to_parquet(DISCORD_HISTORY_PARQUET)
-    print(f'updated {DISCORD_HISTORY_PARQUET}')
-
-def update_google_sheet():
-    LDB.update_signup_info(fgg.get_month(flg.NEXT_MONTH))
-
-    for week_num in [1, 2, 3, 4]:
-        season_name = fgg.get_month(0)
-        df = LDB.get_games_by_week(season_name, week_num)
-        to_sheet = df[[
-            'game_id',
-            'white_discord_name',
-            'white_chesscom',
-            'white_rapid_rating',
-            'black_rapid_rating',
-            'black_chesscom',
-            'black_discord_name',
-            'schedule',
-            'result',
-            'url',
-        ]]
-        to_sheet['result'] = [
-            DISPLAY_RESULT[r] if not np.isnan(r) else '-'
-            for r in np.array(to_sheet['result'])
-        ]
-        fgg.df_to_sheet(to_sheet, sheet=week_num+1)
+    await ctx.send(message)
 
 class CustomClient(discord.Client):
     async def on_ready(self):

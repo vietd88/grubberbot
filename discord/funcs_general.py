@@ -36,17 +36,27 @@ def gen_pairing_thread_name(game_id, season_name, week_num, white_name, black_na
     )
     return thread_name
 
-def df_to_sheet(df, sheet=0):
+def arr_to_sheet(arr, sheet=0):
     gc = gspread.service_account(filename=GOOGLE_TOKEN)
     sh = gc.open_by_key(GOOGLE_SHEET_NAME)
     sheet = sh.get_worksheet(sheet)
 
-    sheet_array = []
-    sheet_array = sheet_array + [df.columns.values.tolist()]
-    sheet_array = sheet_array + df.values.tolist()
+    sheet_array = arr
     sheet_array = [row + ['' for _ in range(10)] for row in sheet_array]
     sheet_array = sheet_array + [
         ['' for _ in range(len(sheet_array[0]))]
         for _ in range(100)
     ]
     sheet.update(sheet_array)
+
+def df_to_sheet(df, sheet=0, title=None):
+    for col in df.columns:
+        df[col] = [str(e) for e in np.array(df[col])]
+
+    if title is None:
+        sheet_array = []
+    else:
+        sheet_array = [[title]]
+    sheet_array = sheet_array + [df.columns.values.tolist()]
+    sheet_array = sheet_array + df.values.tolist()
+    arr_to_sheet(sheet_array, sheet=sheet)

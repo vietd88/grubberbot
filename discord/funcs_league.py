@@ -21,6 +21,7 @@ import re
 import funcs_chesscom as fcc
 import funcs_general as fgg
 
+# TODO: don't let a player sit out more than one game a season
 # TODO: set iter time to be higher
 
 GENERAL_ERROR_MESSAGE = '{} `!{}` error, get help with `!help {}`'
@@ -414,7 +415,7 @@ class LeagueDatabase:
 
     def get_team_members(self, season_name, team, get_subs=False):
         # Then grab users to split into teams
-        sql = f'''
+        sql = '''
         WITH season_ids AS (SELECT s.id FROM season AS s WHERE s.name = ?),
         team_ids AS (
             SELECT t.id FROM team AS t
@@ -424,12 +425,17 @@ class LeagueDatabase:
         user_ids AS (
             SELECT m.user_id FROM member AS m
             WHERE m.team_id IN team_ids
-            AND m.is_player = {int(not get_subs)}
+            AND m.is_player = ?
         )
 
-        SELECT u.id, u.discord_name, u.chesscom FROM user AS u WHERE u.id IN user_ids
+        SELECT
+            u.id AS user_id,
+            u.discord_id AS discord_id,
+            u.discord_name AS discord_name,
+            u.chesscom AS chesscom
+        FROM user AS u WHERE u.id IN user_ids
         ;'''
-        params = (season_name, team)
+        params = (season_name, team, int(not get_subs))
         df = pd.read_sql_query(sql, self.conn, params=params)
         return df
 
@@ -482,25 +488,127 @@ class LeagueDatabase:
         ;'''
         for team_name, df in dfs.items():
             for row in df.itertuples():
-                params = (team_name, row.id)
+                params = (team_name, row.user_id)
                 self.cur.execute(sql, params)
         self.conn.commit()
 
     def seed_games(self, season_name, week_num):
+        # TODO: don't let a player sit out more than one game a season
+
         rant_df = self.get_team_members(season_name, 'Team Rants')
         rant_df['rating'] = [
             self.chess_db.get_rating(row.chesscom)['rapid']
             for row in rant_df.itertuples()
         ]
+
         nort_df = self.get_team_members(season_name, 'Team No Rants')
         nort_df['rating'] = [
             self.chess_db.get_rating(row.chesscom)['rapid']
             for row in nort_df.itertuples()
         ]
+
         rant_df = rant_df.sort_values(by=['rating'], ignore_index=True)
         nort_df = nort_df.sort_values(by=['rating'], ignore_index=True)
-        print(rant_df)
-        print(nort_df)
+        rant_df_ids = [int(i) for i in rant_df['discord_id']]
+        nort_df_ids = [int(i) for i in nort_df['discord_id']]
+
+        teams = ['Team Rants', 'Team No Rants']
+        games_df = self.get_season_games(season_name)
+        game_history = []
+        for row in games_df.itertuples():
+            if row.white_team_name == 'Team Rants':
+                rant_id = row.white_discord_id
+                nort_id = row.black_discord_id
+            else:
+                nort_id = row.white_discord_id
+                rant_id = row.black_discord_id
+
+            if rant_id not in rant_df_ids:
+                continue
+            if nort_id not in nort_df_ids:
+                continue
+
+            rant_ind = rant_df_ids.index(rant_id)
+            nort_ind = nort_df_ids.index(nort_id)
+
+            game_history.append((rant_ind, nort_ind))
+        game_history = set(game_history)
+
+        def score_inds(rant_inds, nort_inds, verbose=False):
+            for r, n in zip(rant_inds, nort_inds):
+                if (int(r), int(n)) in game_history:
+                    return np.inf
+            rdf = rant_df.iloc[rant_inds]
+            ndf = nort_df.iloc[nort_inds]
+
+            scores = []
+            for rr, nr in zip(rdf.itertuples(), ndf.itertuples()):
+                scores.append((rr.rating - nr.rating)**2)
+
+            score = 0.01*int(np.mean(scores)) + max(scores)
+            if verbose:
+                print(sorted(scores))
+            return score
+
+        def swap_random(seq):
+            idx = range(len(seq))
+            i1, i2 = random.sample(idx, 2)
+            seq[i1], seq[i2] = seq[i2], seq[i1]
+
+        def gen_team_dfs():
+            rant_inds = list(range(len(rant_df)))
+            nort_inds = list(range(len(nort_df)))
+            score = score_inds(rant_inds, nort_inds)
+            start = time.time()
+            rdf = rant_df.iloc[rant_inds]
+            ndf = nort_df.iloc[nort_inds]
+            counter = 0
+            iter_count = 1
+            while time.time() - start < 4:
+                counter += 1
+                old_rant_inds = [r for r in rant_inds]
+                old_nort_inds = [r for r in nort_inds]
+                iter_count += 0.01
+                for _ in range(int(iter_count)):
+                    if random.random() < 0.5:
+                        swap_random(rant_inds)
+                    else:
+                        swap_random(nort_inds)
+                    new_score = score_inds(rant_inds, nort_inds)
+
+                    if new_score < score:
+                        iter_count = 1
+
+                        old_rant_inds = rant_inds
+                        old_nort_inds = nort_inds
+
+                        rdf = rant_df.iloc[old_rant_inds]
+                        ndf = nort_df.iloc[old_nort_inds]
+                        to_print = [
+                            ((rr.rating-nr.rating)**2, f'{rr.rating}-{nr.rating}')
+                            for rr, nr in zip(rdf.itertuples(), ndf.itertuples())
+                        ]
+                        to_print = sorted(to_print)
+                        to_print = [t[1] for t in to_print]
+                        print(score, new_score, to_print[-1], time.time() - start)
+                        score = new_score
+
+                rant_inds = old_rant_inds
+                nort_inds = old_nort_inds
+            print()
+            return score, rdf, ndf
+
+        dfs = [gen_team_dfs() for i in range(8)]
+        dfs = sorted(dfs, key=lambda x: x[0])
+        print([d[0] for d in dfs])
+        score, rdf, ndf = dfs[0]
+
+        rant_df = rdf
+        nort_df = ndf
+        print(rdf)
+        print(ndf)
+        print(score)
+        print(score)
 
         sql = '''
         WITH season_ids AS (SELECT s.id FROM season AS s WHERE s.name = ?),
@@ -533,11 +641,11 @@ class LeagueDatabase:
         )
         ;'''
 
-        for i in range(len(nort_df)):
-            both_ids = [rant_df['id'][i], nort_df['id'][i]]
+        for r, n in zip(rdf.itertuples(), ndf.itertuples()):
+            both_ids = [r.user_id, n.user_id]
             np.random.shuffle(both_ids)
             white_id, black_id = int(both_ids[0]), int(both_ids[1])
-            params = (season_name, white_id, black_id, 1)
+            params = (season_name, white_id, black_id, week_num)
             print(params)
             self.cur.execute(sql, params)
         self.conn.commit()
@@ -601,6 +709,10 @@ class LeagueDatabase:
             self.chess_db.get_rating(c)['rapid']
             for c in df['black_chesscom']
         ]
+        df = df.sort_values(
+            by=['white_rapid_rating', 'black_rapid_rating'],
+            ignore_index=True,
+        )
         return df
 
     def get_sub_announce(self, season_name, week_num, discord_id):
@@ -756,12 +868,14 @@ class LeagueDatabase:
 
     def update_signup_info(self, season_name):
         sql = '''
-        WITH season_ids AS (SELECT s.id FROM season AS s WHERE s.name = ?)
+        WITH season_ids AS (SELECT s.id FROM season AS s WHERE s.name = ?),
+        week_ids AS (SELECT w.id FROM week AS w WHERE w.season_id IN season_ids)
         SELECT u.discord_name, u.chesscom, mb.is_player, wk.num, sd.request
         FROM seed AS sd
         LEFT JOIN week AS wk ON sd.week_id = wk.id
         LEFT JOIN member AS mb ON sd.member_id = mb.id
         LEFT JOIN user AS u ON mb.user_id = u.id
+        WHERE sd.week_id IN week_ids
         ;'''
         params = (season_name,)
         df = pd.read_sql_query(sql, self.conn, params=params)
@@ -799,7 +913,6 @@ class LeagueDatabase:
             ignore_index=True,
         )
 
-        fgg.df_to_sheet(df, sheet=0)
         return df
 
     def set_result(self, game_id, result, url=None):
@@ -853,6 +966,61 @@ class LeagueDatabase:
         df['black_rapid_rating'] = [
             self.chess_db.get_rating(c)['rapid']
             for c in df['black_chesscom']
+        ]
+        return df
+
+    def get_season_games(self, season_name):
+        sql = '''
+        WITH season_ids AS (SELECT s.id FROM season AS s WHERE s.name = ?),
+        week_ids AS (SELECT w.id FROM week AS w WHERE w.season_id IN season_ids),
+        seed_ids AS (SELECT s.id FROM seed AS s WHERE s.week_id IN week_ids)
+
+        SELECT
+            g.id AS game_id,
+            g.schedule AS schedule,
+            g.result AS result,
+            g.url AS url,
+
+            wt.name AS white_team_name,
+            ww.num AS white_week_num,
+            wu.discord_id AS white_discord_id,
+            wu.discord_name AS white_discord_name,
+            wu.chesscom AS white_chesscom,
+
+            bt.name AS black_team_name,
+            bw.num AS black_week_num,
+            bu.discord_id AS black_discord_id,
+            bu.discord_name AS black_discord_name,
+            bu.chesscom AS black_chesscom
+        FROM game AS g
+        LEFT JOIN seed AS ws ON g.white_seed_id = ws.id
+        LEFT JOIN week AS ww ON ws.week_id = ww.id
+        LEFT JOIN member AS wm ON ws.member_id = wm.id
+        LEFT JOIN user AS wu ON wm.user_id = wu.id
+        LEFT JOIN team AS wt ON wm.team_id = wt.id
+
+        LEFT JOIN seed AS bs ON g.black_seed_id = bs.id
+        LEFT JOIN week AS bw ON bs.week_id = bw.id
+        LEFT JOIN member AS bm ON bs.member_id = bm.id
+        LEFT JOIN user AS bu ON bm.user_id = bu.id
+        LEFT JOIN team AS bt ON bm.team_id = bt.id
+
+        WHERE (bt.season_id IN season_ids OR wt.season_id IN season_ids)
+        AND (g.black_seed_id IN seed_ids OR g.white_seed_id IN seed_ids)
+        ;'''
+        params = (season_name,)
+        df = pd.read_sql_query(sql, self.conn, params=params)
+        df['white_rapid_rating'] = [
+            self.chess_db.get_rating(c)['rapid']
+            for c in df['white_chesscom']
+        ]
+        df['black_rapid_rating'] = [
+            self.chess_db.get_rating(c)['rapid']
+            for c in df['black_chesscom']
+        ]
+        df['result'] = [
+            r if not np.isnan(r) else 0
+            for r in np.array(df['result'])
         ]
         return df
 
@@ -1045,11 +1213,29 @@ def backup_databases():
     pass
 
 if __name__ == '__main__':
+
     #read_history()
     LDB = LeagueDatabase()
     season_name = fgg.get_month(NEXT_MONTH)
-    print(LDB.get_games_by_week(season_name, 1))
-    #raise Exception
+    week_num = 2
+
+    if True:
+        print(LDB.get_games_by_week(season_name, week_num))
+        sql = '''
+        WITH week_ids AS (SELECT w.id FROM week AS w WHERE w.num = ?),
+        seed_ids AS (SELECT s.id FROM seed AS s WHERE s.week_id IN week_ids)
+        DELETE FROM game
+        WHERE game.black_seed_id IN seed_ids OR game.white_seed_id IN seed_ids
+        ;'''
+        params = (2,)
+        LDB.cur.execute(sql, params)
+        LDB.conn.commit()
+        print(LDB.get_games_by_week(season_name, week_num))
+
+    LDB.seed_games(season_name, 2)
+    print(LDB.get_games_by_week(season_name, week_num))
+
+    raise Exception
     '''
     rant_df = LDB.get_team_members(season_name, 'Team Rants', get_subs=False)
     nort_df = LDB.get_team_members(season_name, 'Team No Rants', get_subs=False)
