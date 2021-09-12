@@ -6,6 +6,7 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google.oauth2 import service_account
+from pprint import pprint
 
 SCOPES = [
     'https://www.googleapis.com/auth/calendar',
@@ -15,6 +16,7 @@ SCOPES = [
 
 SERVICE_ACCOUNT_FILE = 'data/grubberbot-2f9a174696fa.json'
 CALENDAR_ID ='sk73kniat254fng6gn59u0pebc@group.calendar.google.com'
+TIME_ZONE_WEBSITE = 'https://en.wikipedia.org/wiki/List_of_tz_database_time_zones'
 
 CREDENTIALS = service_account.Credentials.from_service_account_file(
     SERVICE_ACCOUNT_FILE,
@@ -27,19 +29,29 @@ service = gc_build(
     credentials=CREDENTIALS,
 )
 
-def add_event(event_name, start, end):
+def add_event(event_name, start, end, time_zone):
     event = {
       'summary': event_name,
       'start': {
-        'dateTime': '2021-09-28T09:00:00-07:00',
-        'timeZone': 'America/Los_Angeles',
+        'dateTime': str(start).replace(' ', 'T'),
+        'timeZone': time_zone,
       },
       'end': {
-        'dateTime': '2021-09-28T17:00:00-07:00',
-        'timeZone': 'America/Los_Angeles',
+        'dateTime': str(end).replace(' ', 'T'),
+        'timeZone': time_zone,
       },
     }
-    event = service.events().insert(calendarId=CALENDAR_ID, body=event).execute()
+
+    try:
+        event = service.events().insert(calendarId=CALENDAR_ID, body=event).execute()
+    except Exception as e:
+        if 'Invalid time zone' in str(e):
+            message = (
+                f'Invalid time zone `{time_zone}`, please use a time zone '
+                f'in the TZ database name section of this page:\n'
+                f'{TIME_ZONE_WEBSITE}'
+            )
+            return message
 
 def get_next_10_events():
     # Call the Calendar API
@@ -68,7 +80,13 @@ def delete_events(events):
         service.events().delete(calendarId=CALENDAR_ID, eventId=event['id']).execute()
 
 def main():
-    add_event('test_event', 1, 2)
+    now = datetime.datetime.now()
+    start = now + datetime.timedelta(1)
+    end = now + datetime.timedelta(1, 1)
+    time_zone = 'Africa/Abidjan'
+
+    error = add_event('test_event', start, end, time_zone)
+    print(error)
 
     events = get_next_10_events()
     print()

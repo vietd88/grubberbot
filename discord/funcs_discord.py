@@ -813,6 +813,7 @@ async def general_request_substitute(
     )
 
     df = LDB.get_sub_announce(season_name, week_num, user.id)
+    print(df)
     if len(df) > 0:
         seed_id = df['seed_id'][0]
         team_name = df['team_name'][0]

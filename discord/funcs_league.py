@@ -727,7 +727,7 @@ class LeagueDatabase:
         week_ids AS (
             SELECT w.id FROM week AS w
             WHERE w.season_id IN season_ids AND w.num = ?
-        ),
+        )
         SELECT s.id, t.name FROM seed AS s
         LEFT JOIN member AS m ON s.sub_member_id = m.id
         LEFT JOIN team AS t ON m.team_id = t.id
