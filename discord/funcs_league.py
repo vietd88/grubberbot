@@ -23,6 +23,8 @@ import funcs_general as fgg
 
 # TODO: don't let a player sit out more than one game a season
 # TODO: set iter time to be higher
+# TODO: store thread
+# TODO: store week number
 
 GENERAL_ERROR_MESSAGE = '{} `!{}` error, get help with `!help {}`'
 
@@ -70,7 +72,8 @@ class LeagueDatabase:
         season_tbl_sql = '''
         CREATE TABLE IF NOT EXISTS season(
             id integer PRIMARY KEY,
-            name text NOT NULL UNIQUE
+            name text NOT NULL UNIQUE,
+            week_num INTEGER NOT NULL DEFAULT 0
         );'''
 
         # Teams, name is the name of the team. team 'signup' is not yet assigned
@@ -79,6 +82,7 @@ class LeagueDatabase:
             id integer PRIMARY KEY,
             season_id integer NOT NULL REFERENCES season(id),
             name text NOT NULL,
+            discord_id INTEGER NOT NULL DEFAULT 0,
             UNIQUE(season_id, name)
         );'''
 
@@ -110,6 +114,7 @@ class LeagueDatabase:
             sub_member_id integer NOT NULL REFERENCES member(id),
             request integer NOT NULL DEFAULT 0,
             note text,
+            thread_id INTEGER,
             UNIQUE(week_id, member_id)
         );'''
 
@@ -726,19 +731,23 @@ class LeagueDatabase:
         ),
         week_ids AS (
             SELECT w.id FROM week AS w
-            WHERE w.season_id IN season_ids AND w.num = ?
+            WHERE w.season_id IN season_ids
+            AND w.num = ?
         )
-        SELECT s.id, t.name FROM seed AS s
+        SELECT
+            s.id AS seed_id,
+            w.num as week_num,
+            u.discord_name AS discord_name,
+            t.name AS team_name
+        FROM seed AS s
+        LEFT JOIN week AS w ON s.week_id = w.id
         LEFT JOIN member AS m ON s.sub_member_id = m.id
+        LEFT JOIN user AS u ON m.user_id = u.id
         LEFT JOIN team AS t ON m.team_id = t.id
-        WHERE s.week_id IN week_ids AND s.sub_member_id IN member_ids
+        WHERE s.week_id IN week_ids AND s.member_id IN member_ids
         ;'''
-        params = (season_name, week_num, discord_id)
+        params = (season_name, discord_id, week_num)
         df = pd.read_sql_query(sql, self.conn, params=params)
-        df.columns = [
-            'seed_id',
-            'team_name',
-        ]
         return df
 
     def get_gameid_from_seedid(self, seed_id):
@@ -1213,11 +1222,34 @@ def backup_databases():
     pass
 
 if __name__ == '__main__':
-
-    #read_history()
     LDB = LeagueDatabase()
     season_name = fgg.get_month(NEXT_MONTH)
     week_num = 2
+
+    # Current week num
+    # team mention-id
+    # seed sub request thread-id
+    # game thread-id
+
+    sql = '''
+    ALTER TABLE seed ADD COLUMN sub_thread_id INTEGER
+    ;'''
+    #params = (,)
+    LDB.cur.execute(sql)
+    LDB.conn.commit()
+    df_dict = LDB.get_all_tables()
+    for name, df in df_dict.items():
+        print(df)
+        print(name)
+        print()
+    raise Exception
+
+    #read_history()
+
+    discord_id = 496395908821549066
+    df = LDB.get_sub_announce(season_name, week_num, discord_id)
+    print(df)
+    raise Exception
 
     if True:
         print(LDB.get_games_by_week(season_name, week_num))

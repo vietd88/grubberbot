@@ -812,8 +812,10 @@ async def general_request_substitute(
         f'week {week_num} of the rapid league `{season_name}` season'
     )
 
+    print(season_name, week_num, user.id)
     df = LDB.get_sub_announce(season_name, week_num, user.id)
     print(df)
+    return 'testing'
     if len(df) > 0:
         seed_id = df['seed_id'][0]
         team_name = df['team_name'][0]
