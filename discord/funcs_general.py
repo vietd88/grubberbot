@@ -74,7 +74,7 @@ def df_to_sheet(df, sheet=0, title=None):
 
 def dfs_to_sheet(dfs, sheet=0):
     arrs = [gen_df_to_sheet(df, title=title) for title, df in dfs.items()]
-    arrs = sorted(arrs, key=lambda x: len(x))
+    arrs = sorted(arrs, key=lambda x: len(x), reverse=True)
     if len(dfs):
         longest_arr = max(len(a) for a in arrs)
     else:

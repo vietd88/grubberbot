@@ -650,7 +650,7 @@ def title_to_game_id(title):
     game_id = int(title.split(' ')[0][1:])
     return game_id
 
-@commands.command(name='user_set_result')
+@commands.command(name='set_result')
 async def user_set_result(ctx, url):
     '''Use with the game url in a game thread to assign a result to the game'''
     user = ctx.message.author
@@ -918,6 +918,69 @@ async def mod_request_substitute_next(
     await ctx.send(message)
 
 ############################### Other commands
+"""
+async def general_schedule(mention, user, game_datetime, time_zone):
+
+    game_date = datetime.datetime.fromisoformat(game_datetime)
+
+    game_time =
+
+    rules = [
+        game_date.count('-') == 2,
+        game_time.count(':') == 1,
+    ]
+    date_split = game_date.split('-')
+    time_split = game_time.split(':')
+    rules.extend([d.isdigit() for d in date_split])
+    rules.extend([t.isdigit() for t in time_split])
+
+    if not all(rules):
+        message = (
+            f'{mention} Incorrect datetime format.  Please use `YYYY-MM-DD HH:MM`'
+        )
+
+    game_time = datetime.datetime(
+        'year': year,
+        'month': month,
+        'day': day,
+        'hour': hour,
+        'minute': minute,
+        'second':
+    )
+
+    df = LDB.get_league_info(season_name, user.id)
+    if len(df) == 0:
+        message = (
+            f'{mention} user {user.mention} is not currently signed up '
+            f'for the rapid league `{season_name}` season'
+        )
+    else:
+        LDB.league_leave(season_name, user.id)
+        message = (
+            f'{mention} user {user.mention} has left the '
+            f'rapid league `{season_name}` season'
+        )
+    return message
+
+@commands.command(name='leave_next')
+async def user_leave_next(ctx):
+    '''To leave the upcoming rapid league season'''
+    user = ctx.message.author
+    mention = user.mention
+    season_name = fgg.get_month(1)
+    message = await general_leave(mention, user, season_name)
+    await ctx.send(message)
+
+@commands.command(name='mod_leave_next')
+@commands.has_any_role(*MODERATOR_ROLES)
+async def mod_leave_next(ctx, discord_mention: discord.Member):
+    '''Remove user from upcoming league'''
+    mention = ctx.message.author.mention
+    season_name = fgg.get_month(1)
+    message = await general_leave(mention, discord_mention, season_name)
+    await ctx.send(message)
+"""
+
 @commands.command(name='test')
 async def test(ctx):
     '''A test message to make sure GrubberBot is working'''
