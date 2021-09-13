@@ -41,22 +41,56 @@ def arr_to_sheet(arr, sheet=0):
     sh = gc.open_by_key(GOOGLE_SHEET_NAME)
     sheet = sh.get_worksheet(sheet)
 
+    if len(arr):
+        row_length = len(arr[0])
+    else:
+        row_length = 0
+
     sheet_array = arr
-    sheet_array = [row + ['' for _ in range(10)] for row in sheet_array]
     sheet_array = sheet_array + [
-        ['' for _ in range(len(sheet_array[0]))]
-        for _ in range(100)
+        ['' for _ in range(row_length)] for _ in range(100)
     ]
+    sheet_array = [row + ['' for _ in range(10)] for row in sheet_array]
     sheet.update(sheet_array)
 
-def df_to_sheet(df, sheet=0, title=None):
+def gen_df_to_sheet(df, title=None):
     for col in df.columns:
         df[col] = [str(e) for e in np.array(df[col])]
 
     if title is None:
         sheet_array = []
     else:
-        sheet_array = [[title]]
+        sheet_array = [['' for _ in range(len(list(df.columns)))] for _ in title]
+        for r, row in enumerate(title):
+            for e, elem in enumerate(row):
+                sheet_array[r][e] = elem
     sheet_array = sheet_array + [df.columns.values.tolist()]
     sheet_array = sheet_array + df.values.tolist()
+    return sheet_array
+
+def df_to_sheet(df, sheet=0, title=None):
+    sheet_array = gen_df_to_sheet(df, title=title)
+    arr_to_sheet(sheet_array, sheet=sheet)
+
+def dfs_to_sheet(dfs, sheet=0):
+    arrs = [gen_df_to_sheet(df, title=title) for title, df in dfs.items()]
+    arrs = sorted(arrs, key=lambda x: len(x))
+    if len(dfs):
+        longest_arr = max(len(a) for a in arrs)
+    else:
+        longest_arr = 0
+    for arr in arrs:
+        while len(arr) < longest_arr:
+            arr.append(['' for _ in range(len(arr[0]))])
+
+        for row in arr:
+            row.append('')
+
+    sheet_array = []
+    for i in range(longest_arr):
+        row = []
+        for j in range(len(arrs)):
+            row.extend(arrs[j][i])
+        sheet_array.append(row)
+
     arr_to_sheet(sheet_array, sheet=sheet)

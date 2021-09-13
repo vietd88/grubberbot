@@ -25,6 +25,7 @@ import funcs_general as fgg
 # TODO: set iter time to be higher
 # TODO: store thread
 # TODO: store week number
+# TODO: refresh discord names
 
 GENERAL_ERROR_MESSAGE = '{} `!{}` error, get help with `!help {}`'
 
@@ -114,7 +115,7 @@ class LeagueDatabase:
             sub_member_id integer NOT NULL REFERENCES member(id),
             request integer NOT NULL DEFAULT 0,
             note text,
-            thread_id INTEGER,
+            sub_thread_id INTEGER,
             UNIQUE(week_id, member_id)
         );'''
 
@@ -127,6 +128,7 @@ class LeagueDatabase:
             schedule text,
             result integer,
             url text,
+            thread_id INTEGER,
             UNIQUE(white_seed_id, black_seed_id)
         );'''
 
@@ -177,7 +179,7 @@ class LeagueDatabase:
         SELECT u.discord_name, u.chesscom, mb.is_player, wk.num, sd.request
         FROM seed AS sd
         LEFT JOIN week AS wk ON sd.week_id = wk.id
-        LEFT JOIN member AS mb ON sd.member_id = mb.id
+        LEFT JOIN member AS mb ON sd.sub_member_id = mb.id
         LEFT JOIN user_subset AS u ON mb.user_id = u.id
         WHERE u.id IS NOT NULL
         ;'''
@@ -218,6 +220,14 @@ class LeagueDatabase:
         )
         return df
 
+    def update_discord_name(self, discord_id, discord_name):
+        sql = '''
+        UPDATE user SET discord_name = ? WHERE user.discord_id = ?
+        ;'''
+        params = (discord_id, discord_name)
+        self.cur.execute(sql, params)
+        self.conn.commit()
+
     def set_chesscom(self, discord_id, discord_name, chesscom):
         sql = '''
         INSERT INTO user(discord_id, discord_name, chesscom)
@@ -254,7 +264,7 @@ class LeagueDatabase:
         )
 
         UPDATE seed SET request = 1
-        WHERE seed.member_id IN member_ids
+        WHERE seed.sub_member_id IN member_ids
         AND seed.week_id IN week_ids
         ;'''
         params = (season_name, discord_id, week_num)
@@ -280,14 +290,14 @@ class LeagueDatabase:
             WHERE w.num = ? AND w.season_id IN season_ids
         ),
         seed_subset AS (
-            SELECT s.id, s.member_id FROM seed AS s
+            SELECT s.id, s.sub_member_id FROM seed AS s
             WHERE s.week_id IN week_ids
         ),
 
         INSERT INTO game(white_seed_id, black_seed_id)
         VALUES(
-            (SELECT s.id FROM seed_subset AS s WHERE s.member_id IN white_member_ids),
-            (SELECT s.id FROM seed_subset AS s WHERE s.member_id IN black_member_ids),
+            (SELECT s.id FROM seed_subset AS s WHERE s.sub_member_id IN white_member_ids),
+            (SELECT s.id FROM seed_subset AS s WHERE s.sub_member_id IN black_member_ids),
         )
         ;'''
 
@@ -307,7 +317,7 @@ class LeagueDatabase:
         week_ids AS (SELECT w.id FROM week AS w WHERE w.season_id IN season_ids),
         seed_ids AS (
             SELECT s.id FROM seed AS s
-            WHERE s.week_id IN week_ids AND s.user_id IN user_ids
+            WHERE s.week_id IN week_ids AND s.sub_member_id IN member_ids
         )
         SELECT g.* FROM game AS g
         WHERE g.black_seed_id IN seed_ids
@@ -635,12 +645,12 @@ class LeagueDatabase:
         VALUES(
             (
                 SELECT s.id FROM seed AS s
-                WHERE s.member_id IN white_member_ids
+                WHERE s.sub_member_id IN white_member_ids
                 AND s.week_id in week_ids
             ),
             (
                 SELECT s.id FROM seed AS s
-                WHERE s.member_id IN black_member_ids
+                WHERE s.sub_member_id IN black_member_ids
                 AND s.week_id in week_ids
             )
         )
@@ -685,10 +695,10 @@ class LeagueDatabase:
             bu.chesscom
         FROM game AS g
         LEFT JOIN seed AS ws ON g.white_seed_id = ws.id
-        LEFT JOIN member AS wm ON ws.member_id = wm.id
+        LEFT JOIN member AS wm ON ws.sub_member_id = wm.id
         LEFT JOIN user AS wu ON wm.user_id = wu.id
         LEFT JOIN seed AS bs ON g.black_seed_id = bs.id
-        LEFT JOIN member AS bm ON bs.member_id = bm.id
+        LEFT JOIN member AS bm ON bs.sub_member_id = bm.id
         LEFT JOIN user AS bu ON bm.user_id = bu.id
         WHERE g.black_seed_id IN seed_ids OR g.white_seed_id IN seed_ids
         ;'''
@@ -736,38 +746,34 @@ class LeagueDatabase:
         )
         SELECT
             s.id AS seed_id,
-            w.num as week_num,
             u.discord_name AS discord_name,
             t.name AS team_name
         FROM seed AS s
-        LEFT JOIN week AS w ON s.week_id = w.id
         LEFT JOIN member AS m ON s.sub_member_id = m.id
         LEFT JOIN user AS u ON m.user_id = u.id
         LEFT JOIN team AS t ON m.team_id = t.id
-        WHERE s.week_id IN week_ids AND s.member_id IN member_ids
+        WHERE s.week_id IN week_ids AND s.sub_member_id IN member_ids
         ;'''
         params = (season_name, discord_id, week_num)
         df = pd.read_sql_query(sql, self.conn, params=params)
         return df
 
+    def set_sub_thread_id(self, seed_id, sub_thread_id):
+        sql = '''
+        UPDATE seed SET sub_thread_id = ? WHERE seed.id = ?
+        ;'''
+        params = (sub_thread_id, seed_id)
+        self.cur.execute(sql, params)
+        self.conn.commit()
+
     def get_gameid_from_seedid(self, seed_id):
         sql = '''
-            g.id,
-            g.schedule,
-            g.result,
-            g.url,
-            wu.discord_id,
-            wu.discord_name,
-            wu.chesscom,
-            bu.discord_id,
-            bu.discord_name,
-            bu.chesscom
         SELECT g.id, wu.discord_id, bu.discord_id FROM game AS g
         LEFT JOIN seed AS ws ON g.white_seed_id = ws.id
-        LEFT JOIN member AS wm ON ws.member_id = wm.id
+        LEFT JOIN member AS wm ON ws.sub_member_id = wm.id
         LEFT JOIN user AS wu ON wm.user_id = wu.id
         LEFT JOIN seed AS bs ON g.black_seed_id = bs.id
-        LEFT JOIN member AS bm ON bs.member_id = bm.id
+        LEFT JOIN member AS bm ON bs.sub_member_id = bm.id
         LEFT JOIN user AS bu ON bm.user_id = bu.id
         WHERE g.white_seed_id = ? OR g.black_seed_id = ?
         ;'''
@@ -782,22 +788,22 @@ class LeagueDatabase:
 
     def get_claim_sub_from(self, seed_id):
         sql = '''
-        SELECT t.name, u.chesscom, ss.name, w.num FROM seed AS s
+        SELECT
+            t.name AS team_name,
+            u.chesscom AS chesscom,
+            ss.name AS season_name,
+            w.num AS week_num
+        FROM seed AS s
         LEFT JOIN week AS w ON s.week_id = w.id
         LEFT JOIN member AS m ON s.sub_member_id = m.id
         LEFT JOIN team AS t ON m.team_id = t.id
         LEFT JOIN season AS ss ON t.season_id = ss.id
         LEFT JOIN user AS u ON m.user_id = u.id
-        WHERE s.seed_id = ?
+        WHERE s.id = ?
+        AND request = 1
         ;'''
-        params = (season_name, week_num, discord_id)
+        params = (seed_id,)
         df = pd.read_sql_query(sql, self.conn, params=params)
-        df.columns = [
-            'team_name',
-            'chesscom',
-            'season_name',
-            'week_num',
-        ]
         return df
 
     def get_claim_sub_to(self, season_name, discord_id):
@@ -810,8 +816,8 @@ class LeagueDatabase:
             WHERE m.team_id IN team_ids AND m.user_id IN user_ids
         )
         SELECT m.id, t.name, u.chesscom FROM member AS m
-        LEFT JOIN user AS u ON m.user_id = user.id
-        LEFT JOIN team AS t on m.team_id = team.id
+        LEFT JOIN user AS u ON m.user_id = u.id
+        LEFT JOIN team AS t on m.team_id = t.id
         WHERE m.user_id IN user_ids AND m.team_id IN team_ids
         ;'''
         params = (season_name, discord_id)
@@ -832,7 +838,7 @@ class LeagueDatabase:
         sub_member_id = (
             SELECT m.id FROM member AS m
             WHERE m.team_id IN team_ids AND m.user_id IN user_ids
-        )
+        ),
         request = 0
         WHERE seed.id = ?
         ;'''
@@ -841,25 +847,12 @@ class LeagueDatabase:
         self.conn.commit()
 
         sql = '''
-        WITH season_ids AS (SELECT s.id FROM season AS s WHERE s.name = ?),
-        team_ids AS (SELECT t.id FROM team AS t WHERE t.season_id IN season_ids),
-        user_ids AS (SELECT u.id FROM user AS u WHERE u.discord_id = ?),
-        member_ids AS (
-            SELECT m.id FROM member AS m
-            WHERE m.team_id IN team_ids AND m.user_id IN user_ids
-        ),
-        week_ids AS (SELECT w.id FROM week AS w WHERE w.season_id IN season_ids),
-        seed_ids AS (
-            SELECT s.id FROM seed AS s
-            WHERE s.week_id IN week_ids
-            AND s.user_id IN user_ids
-            AND s.ids = ?
-        )
+        WITH seed_ids AS (SELECT s.id FROM seed AS s WHERE s.id = ?)
         UPDATE game SET
         schedule = ?
-        WHERE g.black_seed_id IN seed_ids OR g.white_seed_id IN seed_ids
+        WHERE game.black_seed_id IN seed_ids OR game.white_seed_id IN seed_ids
         ;'''
-        params = (season_name, discord_id, seed_id, None)
+        params = (seed_id, None)
         self.cur.execute(sql, params)
         self.conn.commit()
 
@@ -879,10 +872,15 @@ class LeagueDatabase:
         sql = '''
         WITH season_ids AS (SELECT s.id FROM season AS s WHERE s.name = ?),
         week_ids AS (SELECT w.id FROM week AS w WHERE w.season_id IN season_ids)
-        SELECT u.discord_name, u.chesscom, mb.is_player, wk.num, sd.request
+        SELECT
+            u.discord_name,
+            u.chesscom,
+            mb.is_player,
+            wk.num,
+            sd.request
         FROM seed AS sd
         LEFT JOIN week AS wk ON sd.week_id = wk.id
-        LEFT JOIN member AS mb ON sd.member_id = mb.id
+        LEFT JOIN member AS mb ON sd.sub_member_id = mb.id
         LEFT JOIN user AS u ON mb.user_id = u.id
         WHERE sd.week_id IN week_ids
         ;'''
@@ -947,10 +945,10 @@ class LeagueDatabase:
             bu.chesscom
         FROM game AS g
         LEFT JOIN seed AS ws ON g.white_seed_id = ws.id
-        LEFT JOIN member AS wm ON ws.member_id = wm.id
+        LEFT JOIN member AS wm ON ws.sub_member_id = wm.id
         LEFT JOIN user AS wu ON wm.user_id = wu.id
         LEFT JOIN seed AS bs ON g.black_seed_id = bs.id
-        LEFT JOIN member AS bm ON bs.member_id = bm.id
+        LEFT JOIN member AS bm ON bs.sub_member_id = bm.id
         LEFT JOIN user AS bu ON bm.user_id = bu.id
         WHERE g.id = ?
         ;'''
@@ -978,6 +976,58 @@ class LeagueDatabase:
         ]
         return df
 
+    def get_member_info(self, season_name):
+        sql = '''
+        WITH season_ids AS (SELECT s.id FROM season AS s WHERE s.name = ?),
+        team_ids AS (
+            SELECT t.id AS id FROM team AS t
+            WHERE t.season_id in season_ids
+        )
+
+        SELECT
+            m.id AS member_id,
+            m.is_player AS is_player,
+            t.name AS team_name,
+            u.discord_name AS discord_name,
+            u.chesscom AS chesscom
+        FROM member as m
+        LEFT JOIN team AS t ON m.team_id = t.id
+        LEFT JOIN user AS u ON m.user_id = u.id
+        WHERE m.team_id IN team_ids
+        ;'''
+        params = (season_name,)
+        df = pd.read_sql_query(sql, self.conn, params=params)
+        df['rapid_rating'] = [
+            self.chess_db.get_rating(c)['rapid']
+            for c in df['chesscom']
+        ]
+        return df
+
+    def get_request_info(self, season_name):
+        sql = '''
+        WITH season_ids AS (SELECT s.id FROM season AS s WHERE s.name = ?),
+        team_ids AS (
+            SELECT t.id AS id FROM team AS t
+            WHERE t.season_id in season_ids
+        ),
+        member_ids AS (
+            SELECT m.id AS id FROM member AS m
+            WHERE m.team_id in team_ids
+        )
+
+        SELECT
+            m.id AS member_id,
+            w.num AS week_num,
+            s.request AS request
+        FROM seed as s
+        LEFT JOIN member AS m ON s.member_id = m.id
+        LEFT JOIN week AS w ON s.week_id = w.id
+        WHERE s.member_id IN member_ids
+        ;'''
+        params = (season_name,)
+        df = pd.read_sql_query(sql, self.conn, params=params)
+        return df
+
     def get_season_games(self, season_name):
         sql = '''
         WITH season_ids AS (SELECT s.id FROM season AS s WHERE s.name = ?),
@@ -990,13 +1040,13 @@ class LeagueDatabase:
             g.result AS result,
             g.url AS url,
 
-            wt.name AS white_team_name,
+            wm.id AS white_member_id,
             ww.num AS white_week_num,
             wu.discord_id AS white_discord_id,
             wu.discord_name AS white_discord_name,
             wu.chesscom AS white_chesscom,
 
-            bt.name AS black_team_name,
+            bm.id AS black_member_id,
             bw.num AS black_week_num,
             bu.discord_id AS black_discord_id,
             bu.discord_name AS black_discord_name,
@@ -1004,33 +1054,20 @@ class LeagueDatabase:
         FROM game AS g
         LEFT JOIN seed AS ws ON g.white_seed_id = ws.id
         LEFT JOIN week AS ww ON ws.week_id = ww.id
-        LEFT JOIN member AS wm ON ws.member_id = wm.id
+        LEFT JOIN member AS wm ON ws.sub_member_id = wm.id
         LEFT JOIN user AS wu ON wm.user_id = wu.id
         LEFT JOIN team AS wt ON wm.team_id = wt.id
 
         LEFT JOIN seed AS bs ON g.black_seed_id = bs.id
         LEFT JOIN week AS bw ON bs.week_id = bw.id
-        LEFT JOIN member AS bm ON bs.member_id = bm.id
+        LEFT JOIN member AS bm ON bs.sub_member_id = bm.id
         LEFT JOIN user AS bu ON bm.user_id = bu.id
         LEFT JOIN team AS bt ON bm.team_id = bt.id
 
-        WHERE (bt.season_id IN season_ids OR wt.season_id IN season_ids)
         AND (g.black_seed_id IN seed_ids OR g.white_seed_id IN seed_ids)
         ;'''
         params = (season_name,)
         df = pd.read_sql_query(sql, self.conn, params=params)
-        df['white_rapid_rating'] = [
-            self.chess_db.get_rating(c)['rapid']
-            for c in df['white_chesscom']
-        ]
-        df['black_rapid_rating'] = [
-            self.chess_db.get_rating(c)['rapid']
-            for c in df['black_chesscom']
-        ]
-        df['result'] = [
-            r if not np.isnan(r) else 0
-            for r in np.array(df['result'])
-        ]
         return df
 
 def gen_split_score(df, splits):
@@ -1226,17 +1263,21 @@ if __name__ == '__main__':
     season_name = fgg.get_month(NEXT_MONTH)
     week_num = 2
 
+    df = LDB.get_claim_sub_from(202)
+    print(df)
+    raise Exception
+
     # Current week num
     # team mention-id
     # seed sub request thread-id
     # game thread-id
 
     sql = '''
-    ALTER TABLE seed ADD COLUMN sub_thread_id INTEGER
+    ALTER TABLE game ADD COLUMN thread_id INTEGER
     ;'''
     #params = (,)
-    LDB.cur.execute(sql)
-    LDB.conn.commit()
+    #LDB.cur.execute(sql)
+    #LDB.conn.commit()
     df_dict = LDB.get_all_tables()
     for name, df in df_dict.items():
         print(df)

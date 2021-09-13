@@ -22,7 +22,7 @@ DISCORD_HISTORY_PARQUET = 'data/discord_history.parquet'
 LOG_FILE = 'data/grubberbot.log'
 GRUBBER_MENTION = '<@490529572908171284>'
 GUILD_NAME = "pawngrubber's server"
-ANNOUNCE_SUB_CHANNEL = 'grubberbot-debug'
+ANNOUNCE_SUB_CHANNEL = 'league-moderation'
 ELO_EXTRA = 100
 
 logging.basicConfig(
@@ -74,6 +74,12 @@ async def get_all_threads(guild):
     ]
     return threads
 
+def update_discord_names(guild):
+    members = list(guild.members)
+    print(members)
+    for member in tqdm(members):
+        LDB.update_discord_name(member.id, str(member))
+
 async def announce_pairing(bot, guild):
     season_name = fgg.get_month(0)
     week_num = 2
@@ -123,6 +129,8 @@ async def announce_substitute(mention, team_mention, guild, seed_id, week_num):
         type=discord.ChannelType.public_thread,
         reason='testing-purposes',
     )
+
+    LDB.set_sub_thread_id(seed_id, thread.id)
 
     message = (
         f'{mention} has requested a substitute on week {week_num}.  '
@@ -185,72 +193,102 @@ async def save_discord_history(guild):
     df.to_parquet(DISCORD_HISTORY_PARQUET)
     print(f'updated {DISCORD_HISTORY_PARQUET}')
 
+def gen_season_info(season_name):
+    # Standings
+    member_df = LDB.get_member_info(season_name)
+    game_df = LDB.get_season_games(season_name)
+    request_df = LDB.get_request_info(season_name)
+
+    point_dict = {1: 3, 0: 1, -1: 0}
+    game_df = game_df[[(r in point_dict) for r in game_df['result']]]
+    gdfs = []
+    for color in ['white', 'black']:
+        gdf = game_df[[
+            'game_id',
+            'schedule',
+            'url',
+        ]]
+        if color == 'white':
+            gdf['result'] = [point_dict[int(r)] for r in game_df['result']]
+        else:
+            gdf['result'] = [point_dict[int(r)*(-1)] for r in game_df['result']]
+        gdf['member_id'] = game_df[f'{color}_member_id']
+        gdf['week_num'] = game_df[f'{color}_week_num']
+        gdf['discord_id'] = game_df[f'{color}_discord_id']
+        gdf['discord_name'] = game_df[f'{color}_discord_name']
+        gdf['chesscom'] = game_df[f'{color}_chesscom']
+        gdfs.append(gdf)
+    game_df = pd.concat(gdfs)
+
+    df_dict = {
+        'team': [],
+        'elo': [],
+        'discord_name': [],
+        'chesscom': [],
+        'role': [],
+        'points': [], # points out of possible total
+    }
+    df_dict.update({f'week {i}': [] for i in range(1, 5)})
+    player_dict = {0: 'substitute', 1: 'player'}
+    for row in member_df.itertuples():
+        game_subset = game_df[game_df['member_id'] == row.member_id]
+        request_subset = request_df[request_df['member_id'] == row.member_id]
+        sub_dict = {0: 'no', 1: 'yes'}
+        request_dict = {
+            int(r.week_num): r.request
+            for r in request_subset.itertuples()
+        }
+
+        df_dict['team'].append(row.team_name)
+        df_dict['elo'].append(row.rapid_rating)
+        df_dict['discord_name'].append(row.discord_name)
+        df_dict['chesscom'].append(row.chesscom)
+        df_dict['role'].append(player_dict[row.is_player])
+
+        points = sum(game_subset['result'])
+        total_points = 3*len(game_subset)
+        df_dict['points'].append(f'{points}/{total_points}')
+        for i in range(1, 5):
+            if i in request_dict:
+                request = request_dict[i]
+            else:
+                request = np.nan
+            if not row.is_player:
+                request = '-'
+            request = str(request)
+            df_dict[f'week {i}'].append(request)
+    df = pd.DataFrame(df_dict)
+    df = df.sort_values(
+        by=['role', 'elo', 'discord_name', 'chesscom'],
+        ignore_index=True,
+    )
+
+    dfs = {}
+    for team in set(df['team']):
+        sdf = df[df['team'] == team]
+        del sdf['team']
+
+        points = [[int(q) for q in p.split('/')] for p in sdf['points']]
+        points = f'{sum(p[0] for p in points)}/{sum(p[1] for p in points)}'
+        key = (
+            (season_name,),
+            (team, '', f'{points} points', '', '', 'Sub Requests'),
+        )
+
+        dfs[key] = sdf
+
+    return dfs
+
 def update_google_sheet():
     # Sign-up info
     season_name = fgg.get_month()
-    df = LDB.update_signup_info(season_name)
-    fgg.df_to_sheet(df, sheet=0, title=season_name)
+    dfs = gen_season_info(season_name)
+    fgg.dfs_to_sheet(dfs, sheet=0)
 
-    # Standings
-    df = LDB.get_season_games(season_name)
-    teams = list(df['white_team_name']) + list(df['black_team_name'])
-    teams = set(teams)
-    result_dict = {1: 3, 0: 1, -1: 0}
-    white_dict = [
-        {
-            'score': result_dict[row.result],
-            'team': row.white_team_name,
-            'rapid_rating': row.white_rapid_rating,
-            'discord_name': row.white_discord_name,
-            'chesscom': row.white_chesscom,
-        }
-        for row in df.itertuples()
-    ]
-    black_dict = [
-        {
-            'score': result_dict[row.result * (-1)],
-            'team': row.black_team_name,
-            'rapid_rating': row.black_rapid_rating,
-            'discord_name': row.black_discord_name,
-            'chesscom': row.black_chesscom,
-        }
-        for row in df.itertuples()
-    ]
-    seeds = white_dict + black_dict
-    members = {team: [] for team in teams}
-    for seed in seeds:
-        key = (seed['discord_name'], seed['chesscom'], seed['rapid_rating'])
-        members[seed['team']].append(key)
-    members = {k: {m: 0 for m in list(set(v))} for k, v in members.items()}
-    for seed in seeds:
-        key = (seed['discord_name'], seed['chesscom'], seed['rapid_rating'])
-        members[seed['team']][key] += seed['score']
-
-    members = {
-        t: sorted([[u[0], u[1], u[2], s, ''] for u, s in m.items()], key=lambda x: x[2])
-        for t, m in members.items()
-    }
-    for team in teams:
-        points = sum(row[3] for row in members[team])
-        val = [['', '', '', points, ''], ['', '', '', '', '']]
-        members[team] = val + members[team]
-
-    cols = [[
-        e for team in teams for e in
-        [team, 'Chesscom', 'Rapid Elo', 'Points', '']
-    ]]
-    max_length = max(len(v) for k, v in members.items())
-    for k in members.keys():
-        while len(members[k]) < max_length:
-            members[k].append(['', '', '', ''])
-    arr = []
-    for i in range(max_length):
-        arr.append([])
-        for team in teams:
-            row = members[team][i]
-            arr[i] = arr[i] + members[team][i]
-    arr = cols + arr
-    fgg.arr_to_sheet(arr, sheet=1)
+    # Next season sign-up info
+    season_name = fgg.get_month(1)
+    dfs = gen_season_info(season_name)
+    fgg.dfs_to_sheet(dfs, sheet=1)
 
     # Pairings
     for week_num in [1, 2, 3, 4]:
@@ -273,11 +311,6 @@ def update_google_sheet():
             for r in np.array(to_sheet['result'])
         ]
         fgg.df_to_sheet(to_sheet, sheet=week_num+1)
-
-    # Next season sign-up info
-    season_name = fgg.get_month(1)
-    df = LDB.update_signup_info(season_name)
-    fgg.df_to_sheet(df, sheet=6, title=season_name)
 
 ################ Exception handling
 def gen_chesscom_username_error(mention, user_mention, mod=False):
@@ -664,13 +697,13 @@ async def mod_custom_result(
     await ctx.send(message)
 
 ######################## Define league substitution commands
-async def general_claim_substitute(mention, user, seed_id):
+async def general_claim_substitute(mention, user, guild, seed_id):
 
     # Ensure seed_id exists
     df = LDB.get_claim_sub_from(seed_id)
     if len(df) == 0:
         message = (
-            f'{mention} Seed ID `{seed_id}` does not exist'
+            f'{mention} Seed ID `{seed_id}` does not require a substitute'
         )
         return message
 
@@ -692,6 +725,7 @@ async def general_claim_substitute(mention, user, seed_id):
 
     # Ensure the player is on the same team as the one requesting the sub
     new_team_name = df['team_name'][0]
+    new_chesscom = df['chesscom'][0]
     if team_name != new_team_name:
         message = (
             f'{mention} Error, user {user.mention} is not on team '
@@ -710,7 +744,6 @@ async def general_claim_substitute(mention, user, seed_id):
         return message
 
     # Ensure the player is below ELO_EXTRA
-    new_chesscom = df['chesscom'][0]
     new_rapid_rating = LDB.chess_db.get_rating(new_chesscom)['rapid']
     if new_rapid_rating > max_elo:
         message = (
@@ -724,8 +757,8 @@ async def general_claim_substitute(mention, user, seed_id):
     df = LDB.get_gameid_from_seedid(seed_id)
     game_id = df['game_id'][0]
     white_discord_id = df['white_discord_id'][0]
-    black_discord_id = df['white_discord_id'][0]
-    threads = await get_all_threads(ctx.guild)
+    black_discord_id = df['black_discord_id'][0]
+    threads = await get_all_threads(guild)
     thread = [t for t in threads if t.name.startswith(f'g{game_id}')][0]
 
     message = (
@@ -757,7 +790,7 @@ async def user_claim_substitute(ctx, seed_id: int):
     '''
     user = ctx.message.author
     mention = user.mention
-    message = await general_claim_substitute(mention, user, seed_id)
+    message = await general_claim_substitute(mention, user, ctx.guild, seed_id)
     await ctx.send(message)
 
 help_text = '\n'.join([
@@ -770,12 +803,13 @@ async def mod_claim_substitute(ctx, user: discord.Member, seed_id: int):
         <seed_id> the identifier for the substitution
     '''
     mention = ctx.message.author.mention
-    message = await general_claim_substitute(mention, user, seed_id)
+    message = await general_claim_substitute(mention, user, ctx.guild, seed_id)
     await ctx.send(message)
 
 async def general_request_substitute(
         mention,
         user,
+        guild,
         is_next_season,
         week_num,
         mod=False,
@@ -812,15 +846,11 @@ async def general_request_substitute(
         f'week {week_num} of the rapid league `{season_name}` season'
     )
 
-    print(season_name, week_num, user.id)
     df = LDB.get_sub_announce(season_name, week_num, user.id)
-    print(df)
-    return 'testing'
     if len(df) > 0:
         seed_id = df['seed_id'][0]
         team_name = df['team_name'][0]
-        guild = ctx.guild
-        team_mention = discord.utils.get(guild.roles, name=team_name).mention,
+        team_mention = discord.utils.get(guild.roles, name=team_name).mention
         await announce_substitute(
             user.mention,
             team_mention,
@@ -838,7 +868,7 @@ async def user_request_substitute_current(ctx, sub_week: int):
     '''
     user = ctx.message.author
     mention = user.mention
-    message = await general_request_substitute(mention, user, False, sub_week)
+    message = await general_request_substitute(mention, user, ctx.guild, False, sub_week)
     await ctx.send(message)
 
 help_text = '\n'.join([
@@ -856,7 +886,7 @@ async def mod_request_substitute_current(
     '''
     mention = ctx.message.author.mention
     message = await general_request_substitute(
-        mention, user, False, sub_week, mod=True)
+        mention, user, ctx.guild, False, sub_week, mod=True)
     await ctx.send(message)
 
 @commands.command(name='request_substitute_next')
@@ -866,7 +896,7 @@ async def user_request_substitute_next(ctx, sub_week: int):
     '''
     user = ctx.message.author
     mention = user.mention
-    message = await general_request_substitute(mention, user, True, sub_week)
+    message = await general_request_substitute(mention, user, ctx.guild, True, sub_week)
     await ctx.send(message)
 
 help_text = '\n'.join([
@@ -884,7 +914,7 @@ async def mod_request_substitute_next(
     '''
     mention = ctx.message.author.mention
     message = await general_request_substitute(
-        mention, user, True, sub_week, mod=True)
+        mention, user, ctx.guild, True, sub_week, mod=True)
     await ctx.send(message)
 
 ############################### Other commands
@@ -923,8 +953,11 @@ class CustomClient(discord.Client):
         guild = discord.utils.get(self.guilds, name=GUILD_NAME)
         print(f'Client {self.user} has connected to {guild.name}')
 
-        save_user_data(guild)
-        await save_discord_history(guild)
+        update_discord_names(guild)
+        print('done')
+        #save_user_data(guild)
+        #await save_discord_history(guild)
+
 
 def main():
     load_dotenv()
