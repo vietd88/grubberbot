@@ -648,7 +648,7 @@ def league_set_result(mention, user, game_id, url=None, mod=False, result=None):
     # Get cc_game_id from url
     cc_game_id = fcc.game_id_from_url(url)
     if cc_game_id is None:
-        message = (f'{mention} No chess.com game_id found in url')
+        message = (f'{mention} No chesscom game_id found in url')
         return message
 
     # Get games and index by cc_game_id
