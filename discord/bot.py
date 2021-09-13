@@ -30,6 +30,7 @@ MODERATOR_ROLES = [
 # TODO: @everyone problem
 # TODO: Backup sqlite3 data
 # TODO: !info command
+# TODO: ping users before a season starts to make sure they're active on discord
 
 '''
 !list_commands
@@ -64,7 +65,7 @@ def set_league(discord_id, join_type):
 async def on_ready():
     guild = discord.utils.get(bot.guilds, name=GUILD_NAME)
     print(f'Bot {bot.user.name} has connected to {guild.name}')
-    LDB.update_signup_info(fgg.get_month(flg.NEXT_MONTH))
+    fdd.update_google_sheet()
     #await fdd.announce_pairing(bot, guild)
 
 @bot.event
@@ -77,38 +78,68 @@ async def on_command_error(ctx, error):
 async def on_command_completion(ctx):
     fdd.update_google_sheet()
 
+@commands.command(name='commands')
+async def user_commands(ctx):
+    '''List all user commands available to GrubberBot'''
+    message = [
+        f'`!{command}`'
+        for command in bot.commands
+        if not str(command).startswith('mod')
+    ]
+    message = sorted(message)
+    message = '\n'.join(message)
+    await ctx.send(message)
+
+@commands.command(name='mod_commands')
+async def mod_commands(ctx):
+    '''List all mod commands available to GrubberBot'''
+    message = [
+        f'`!{command}`'
+        for command in bot.commands
+        if str(command).startswith('mod')
+    ]
+    message = sorted(message)
+    message = '\n'.join(message)
+    await ctx.send(message)
+
 def main():
 
     # Testing
     bot.add_command(fdd.test)
+    bot.add_command(user_commands)
+    bot.add_command(mod_commands)
 
     # General commands
     bot.add_command(fdd.league_info)
 
     # League membership
     bot.add_command(fdd.user_set_chesscom)
+    bot.add_command(fdd.user_join_player)
+    bot.add_command(fdd.user_join_substitute)
+    bot.add_command(fdd.user_join_current)
+    bot.add_command(fdd.user_leave_next)
+    #bot.add_command(fdd.user_leave_current)
+
     bot.add_command(fdd.mod_set_chesscom)
-    bot.add_command(fdd.user_league_join)
-    bot.add_command(fdd.mod_league_join)
-    bot.add_command(fdd.user_league_join_current)
-    bot.add_command(fdd.mod_league_join_current)
-    bot.add_command(fdd.user_league_leave)
-    bot.add_command(fdd.mod_league_leave)
-    #bot.add_command(fdd.user_league_leave_current)
-    bot.add_command(fdd.mod_league_leave_current)
+    bot.add_command(fdd.mod_join_player)
+    bot.add_command(fdd.mod_join_substitute)
+    bot.add_command(fdd.mod_join_current)
+    bot.add_command(fdd.mod_leave_next)
+    bot.add_command(fdd.mod_leave_current)
 
     # Setting results
-    bot.add_command(fdd.user_league_set_result)
-    bot.add_command(fdd.mod_league_set_result)
-    bot.add_command(fdd.mod_league_custom_result)
+    bot.add_command(fdd.user_set_result)
+    bot.add_command(fdd.mod_set_result)
+    bot.add_command(fdd.mod_custom_result)
 
     # Requesting substitutes
-    bot.add_command(fdd.user_league_request_sub_next_month)
-    bot.add_command(fdd.user_league_request_sub_this_month)
-    bot.add_command(fdd.mod_league_request_sub_next_month)
-    bot.add_command(fdd.mod_league_request_sub_this_month)
-    bot.add_command(fdd.user_league_claim_substitute)
-    bot.add_command(fdd.mod_league_claim_substitute)
+    bot.add_command(fdd.user_request_substitute_next)
+    bot.add_command(fdd.user_request_substitute_current)
+    bot.add_command(fdd.user_claim_substitute)
+
+    bot.add_command(fdd.mod_request_substitute_next)
+    bot.add_command(fdd.mod_request_substitute_current)
+    bot.add_command(fdd.mod_claim_substitute)
 
     bot.run(DISCORD_TOKEN)
 
