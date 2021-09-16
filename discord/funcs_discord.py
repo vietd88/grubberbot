@@ -107,7 +107,7 @@ async def announce_pairing(bot, guild):
             'this thread so I can help you.  This thread is for:\n'
             '* Scheduling your rapid game.  Any conversation outside of this '
             'thread cannot be regulated by moderators.  You have until '
-            'September 16th 11:59pm ET to schedule your game.\n'
+            'September 16th 11:59pm ET to play your game.\n'
             '* Posting your result.  When your game is done please use '
             '`!set_result <url>` (in this thread) where `<url>` is a link to the '
             'chess.com game.\n\n'
