@@ -44,6 +44,8 @@ def add_event(event_name, start, end, time_zone):
 
     try:
         event = service.events().insert(calendarId=CALENDAR_ID, body=event).execute()
+        event_id = event['id']
+        url = event['htmlLink']
     except Exception as e:
         if 'Invalid time zone' in str(e):
             message = (
@@ -51,7 +53,8 @@ def add_event(event_name, start, end, time_zone):
                 f'in the TZ database name section of this page:\n'
                 f'{TIME_ZONE_WEBSITE}'
             )
-            return message
+            return message, None, None
+    return None, event_id, url
 
 def get_next_10_events():
     # Call the Calendar API
@@ -79,13 +82,16 @@ def delete_events(events):
     for event in events:
         service.events().delete(calendarId=CALENDAR_ID, eventId=event['id']).execute()
 
+def delete_event_by_id(event_id):
+    service.events().delete(calendarId=CALENDAR_ID, eventId=event_id).execute()
+
 def main():
     now = datetime.datetime.now()
     start = now + datetime.timedelta(1)
     end = now + datetime.timedelta(1, 1)
     time_zone = 'Africa/Abidjan'
 
-    error = add_event('test_event', start, end, time_zone)
+    error, event_id, url = add_event('test_event', start, end, time_zone)
     print(error)
 
     events = get_next_10_events()

@@ -126,6 +126,7 @@ class LeagueDatabase:
             white_seed_id integer NOT NULL REFERENCES seed(id),
             black_seed_id integer NOT NULL REFERENCES seed(id),
             schedule text,
+            event_id text,
             result integer,
             url text,
             thread_id INTEGER,
@@ -531,6 +532,7 @@ class LeagueDatabase:
         games_df = self.get_season_games(season_name)
         game_history = []
         for row in games_df.itertuples():
+            print(row)
             if row.white_team_name == 'Team Rants':
                 rant_id = row.white_discord_id
                 nort_id = row.black_discord_id
@@ -613,7 +615,7 @@ class LeagueDatabase:
             print()
             return score, rdf, ndf
 
-        dfs = [gen_team_dfs() for i in range(8)]
+        dfs = [gen_team_dfs() for i in range(16)]
         dfs = sorted(dfs, key=lambda x: x[0])
         print([d[0] for d in dfs])
         score, rdf, ndf = dfs[0]
@@ -930,19 +932,36 @@ class LeagueDatabase:
         self.cur.execute(sql, params)
         self.conn.commit()
 
+    def set_thread_id(self, game_id, thread_id):
+        sql = '''
+        UPDATE game SET thread_id = ? WHERE game.id = ?
+        ;'''
+        params = (game_id, thread_id)
+        self.cur.execute(sql, params)
+        self.conn.commit()
+
+    def schedule(self, game_id, event_id, game_datetime):
+        sql = '''
+        UPDATE game SET schedule = ?, event_id = ? WHERE game.id = ?
+        ;'''
+        params = (str(game_datetime), str(event_id), game_id)
+        self.cur.execute(sql, params)
+        self.conn.commit()
+
     def get_game_by_id(self, game_id):
         sql = '''
         SELECT
-            g.id,
-            g.schedule,
-            g.result,
-            g.url,
-            wu.discord_id,
-            wu.discord_name,
-            wu.chesscom,
-            bu.discord_id,
-            bu.discord_name,
-            bu.chesscom
+            g.id AS game_id,
+            g.schedule AS schedule,
+            g.event_id AS event_id,
+            g.result AS result,
+            g.url AS url,
+            wu.discord_id AS white_discord_id,
+            wu.discord_name AS white_discord_name,
+            wu.chesscom AS white_chesscom,
+            bu.discord_id AS black_discord_id,
+            bu.discord_name AS black_discord_name,
+            bu.chesscom AS black_chesscom
         FROM game AS g
         LEFT JOIN seed AS ws ON g.white_seed_id = ws.id
         LEFT JOIN member AS wm ON ws.sub_member_id = wm.id
@@ -954,18 +973,6 @@ class LeagueDatabase:
         ;'''
         params = (game_id,)
         df = pd.read_sql_query(sql, self.conn, params=params)
-        df.columns = [
-            'game_id',
-            'schedule',
-            'result',
-            'url',
-            'white_discord_id',
-            'white_discord_name',
-            'white_chesscom',
-            'black_discord_id',
-            'black_discord_name',
-            'black_chesscom',
-        ]
         df['white_rapid_rating'] = [
             self.chess_db.get_rating(c)['rapid']
             for c in df['white_chesscom']
@@ -1042,12 +1049,14 @@ class LeagueDatabase:
 
             wm.id AS white_member_id,
             ww.num AS white_week_num,
+            wt.name AS white_team_name,
             wu.discord_id AS white_discord_id,
             wu.discord_name AS white_discord_name,
             wu.chesscom AS white_chesscom,
 
             bm.id AS black_member_id,
             bw.num AS black_week_num,
+            bt.name AS black_team_name,
             bu.discord_id AS black_discord_id,
             bu.discord_name AS black_discord_name,
             bu.chesscom AS black_chesscom
@@ -1261,38 +1270,16 @@ def backup_databases():
 if __name__ == '__main__':
     LDB = LeagueDatabase()
     season_name = fgg.get_month(NEXT_MONTH)
-    week_num = 2
-
-    df = LDB.get_claim_sub_from(202)
-    print(df)
-    raise Exception
+    week_num = 3
 
     # Current week num
     # team mention-id
     # seed sub request thread-id
     # game thread-id
 
-    sql = '''
-    ALTER TABLE game ADD COLUMN thread_id INTEGER
-    ;'''
-    #params = (,)
-    #LDB.cur.execute(sql)
-    #LDB.conn.commit()
-    df_dict = LDB.get_all_tables()
-    for name, df in df_dict.items():
-        print(df)
-        print(name)
-        print()
-    raise Exception
-
     #read_history()
 
-    discord_id = 496395908821549066
-    df = LDB.get_sub_announce(season_name, week_num, discord_id)
-    print(df)
-    raise Exception
-
-    if True:
+    if False:
         print(LDB.get_games_by_week(season_name, week_num))
         sql = '''
         WITH week_ids AS (SELECT w.id FROM week AS w WHERE w.num = ?),
@@ -1300,15 +1287,15 @@ if __name__ == '__main__':
         DELETE FROM game
         WHERE game.black_seed_id IN seed_ids OR game.white_seed_id IN seed_ids
         ;'''
-        params = (2,)
-        LDB.cur.execute(sql, params)
-        LDB.conn.commit()
+        params = (week_num,)
+        #LDB.cur.execute(sql, params)
+        #LDB.conn.commit()
         print(LDB.get_games_by_week(season_name, week_num))
 
-    LDB.seed_games(season_name, 2)
-    print(LDB.get_games_by_week(season_name, week_num))
+    #LDB.seed_games(season_name, week_num)
+    #print(LDB.get_games_by_week(season_name, week_num))
 
-    raise Exception
+    #raise Exception
     '''
     rant_df = LDB.get_team_members(season_name, 'Team Rants', get_subs=False)
     nort_df = LDB.get_team_members(season_name, 'Team No Rants', get_subs=False)

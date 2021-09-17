@@ -10,7 +10,9 @@ import datetime
 import os
 import numpy as np
 import re
+import pytz
 
+import funcs_google as fgo
 import funcs_general as fgg
 import funcs_chesscom as fcc
 import funcs_league as flg
@@ -82,7 +84,7 @@ def update_discord_names(guild):
 
 async def announce_pairing(bot, guild):
     season_name = fgg.get_month(0)
-    week_num = 2
+    week_num = 3
 
     df = LDB.get_games_by_week(season_name, week_num)
     channel = discord.utils.get(guild.channels, name='league-scheduling')
@@ -98,23 +100,39 @@ async def announce_pairing(bot, guild):
         )
         thread = await channel.create_thread(
             name=title,
-            #message=f'{GRUBBER_MENTION} test123',
             type=discord.ChannelType.public_thread,
-            reason='testing-purposes',
+            reason='league-pairing',
         )
+        LDB.set_thread_id(row.game_id, thread.id)
         message = (
-            'Hi! September Rapid League Week 2 has started, please use '
+            'Hi! September Rapid League Week 3 has started, please use '
             'this thread so I can help you.  This thread is for:\n'
-            '* Scheduling your rapid game.  Any conversation outside of this '
-            'thread cannot be regulated by moderators.  You have until '
-            'September 16th 11:59pm ET to play your game.\n'
-            '* Posting your result.  When your game is done please use '
-            '`!set_result <url>` (in this thread) where `<url>` is a link to the '
-            'chess.com game.\n\n'
-            'If you need a substitute please ask in the #league-moderation room.\n\n'
+            '* **Scheduling your rapid game**  Any conversation outside of this '
+            'thread cannot be regulated by moderators, please do all of your '
+            'scheduling in this thread.\n'
+            '* **Posting your game on the calendar** When you decide on a '
+            'game time, confirm it with '
+            '`!schedule YYYY-MM-DD HH:MM <time_zone>`\n'
+            '* **Posting your result**  When your game is done please use '
+            '`!set_result <url>` (in this thread) where `<url>` is a link '
+            'to the chess.com game.\n\n'
             f'<@{row.white_discord_id}> will play white\n'
             f'<@{row.black_discord_id}> will play black\n'
-            'See the pairings online: https://docs.google.com/spreadsheets/d/1SFH7ntDpDW7blX_xBU_m_kSmvY2tLXkuwq-TOM9wyew/edit#gid=2039965781'
+            'See the pairings online: https://docs.google.com/spreadsheets/d/1SFH7ntDpDW7blX_xBU_m_kSmvY2tLXkuwq-TOM9wyew/edit#gid=2039965781\n\n'
+            'Some more things:\n'
+            '* You have until **September 23rd 11:59pm ET** to play your game.\n'
+            '* If you need a substitute please ask in the #league-moderation room.\n'
+            '* Contact your opponent as soon as possible.  If you wait too '
+            'long to contact your opponent, a substitute will be called to '
+            'replace you.  \n'
+            '* Be proactive by offering more than one time to play on more '
+            'than one day with every message.  For example: \n\n'
+            '**Bad message:** “Hey, when can you play?”\n'
+            '**Good message:** “Hey, can you play today in 5 hours?  If not, '
+            'can you play on Wednesday at 10am ET, or maybe Friday at 8pm ET?”\n'
+            '**Bad response:** “No, none of those work for me\n'
+            '**Good response:** “No, none of those work for me.  How about '
+            'tomorrow at 9pm PT or Thursday at 2pm PT?”\n'
         )
         print(message)
         await thread.send(message)
@@ -553,7 +571,118 @@ async def mod_leave_current(ctx, discord_mention: discord.Member):
     message = await general_leave(mention, discord_mention, season_name)
     await ctx.send(message)
 
-######################### Define commands for setting results
+######################### Define commands for scheduling and setting results
+time_zone_map = {
+    'EST': 'America/New_York',
+    'ET': 'America/New_York',
+    'ET': 'America/New_York',
+}
+
+async def general_schedule(mention, user, ctx, date_str, time_str, time_zone):
+    if not isinstance(ctx.message.channel, discord.Thread):
+        message = 'This command must be used in a game thread'
+        return message
+
+    # Check that time zone is not deprecated
+    if time_zone not in pytz.common_timezones:
+        if time_zone in pytz.all_timezones:
+            message = (
+                f'{mention} Time zone `{time_zone}` is deprecated, please '
+                f'check the `Status` column on this site and only use '
+                f'`Canonical` time zones: {fgo.TIME_ZONE_WEBSITE}'
+
+            )
+            if time_zone in time_zone_map:
+                message = message + (
+                    f'.  perhaps you meant {time_zone_map["time_zone"]}?'
+
+                )
+        else:
+            message = (
+                f'{mention} Time zone `{time_zone}` does not exist, '
+                f'please use a time zone from the `TZ database name` '
+                f'column and ensure the `Status` is `Canonical` '
+                f'here: {fgo.TIME_ZONE_WEBSITE}'
+            )
+        print(message)
+        return message
+
+
+    # Get game ID from thread name
+    game_id = title_to_game_id(ctx.message.channel.name)
+    game_df = LDB.get_game_by_id(game_id)
+    if len(game_df) == 0:
+        message = f'{mention} Game ID not found, pinging {GRUBBER_MENTION}'
+        return message
+    game_dict = {c: game_df[c][0] for c in game_df.columns}
+
+    # Put the event on the google calendar
+    game_datetime = datetime.datetime.fromisoformat(f'{date_str} {time_str}')
+    end_datetime = game_datetime + datetime.timedelta(hours=1)
+    '''
+    title = (
+        f'Discord: {game_dict["white_discord_name"]} '
+        f'Chess: {game_dict["white_chesscom"]}\n'
+        f'vs \n'
+        f'Discord: {game_dict["black_discord_name"]} '
+        f'Chess: {game_dict["black_chesscom"]}\n'
+    )
+    '''
+    title = (
+        f'{game_dict["white_chesscom"]} vs {game_dict["black_chesscom"]}'
+    )
+    error, event_id, url = fgo.add_event(title, game_datetime, end_datetime, time_zone)
+
+    if error is not None:
+        print(error)
+        message = (
+            f'{mention} Incorrect datetime format or incorrect time zone. '
+            f'Please use `YYYY-MM-DD HH:MM` (in a 24 hour format, no AM or PM) '
+            f'for the date/time format, and '
+            f'please use a time zone in {fgo.TIME_ZONE_WEBSITE} for example '
+            f' `America/New_York`'
+        )
+        return message
+    if game_dict['event_id']:
+        fgo.delete_event_by_id(game_dict['event_id'])
+
+    # Save the event_id
+    LDB.schedule(game_id, event_id, f'{str(game_datetime)} {time_zone}')
+    message = (
+        f'{mention} Scheduled game `{game_id}` at `{str(game_datetime)}` '
+        f'in time zone `{time_zone}`, see the game on the calendar at {url}'
+    )
+
+    return message
+
+@commands.command(name='schedule')
+async def user_schedule(ctx, date_str, time_str, time_zone):
+    f'''To schedule a game
+    date_str: YYYY-MM-DD, 24 hour format (no AM or PM)
+    time_str: HH:MM
+    time_zone: Any value in the `TZ database name` here {fgo.TIME_ZONE_WEBSITE}
+        for example, `America/New_York`
+    '''
+    user = ctx.message.author
+    mention = user.mention
+    message = await general_schedule(mention, user, ctx, date_str, time_str, time_zone)
+    await ctx.send(message)
+
+@commands.command(name='mod_schedule')
+@commands.has_any_role(*MODERATOR_ROLES)
+async def mod_schedule(ctx, discord_mention: discord.Member, date_str, time_str, time_zone):
+    f'''To schedule a game
+    discord_mention: a @user
+    date_str: YYYY-MM-DD, 24 hour format (no AM or PM)
+    time_str: HH:MM
+    time_zone: Any value in the `TZ database name` here {fgo.TIME_ZONE_WEBSITE}
+        for example, `America/New_York`
+    '''
+    mention = ctx.message.author.mention
+    message = await general_schedule(
+        mention, discord_mention, ctx, date_str, time_str, time_zone)
+    await ctx.send(message)
+
 def general_set_result(mention, user, game_id, url=None, mod=False, result=None):
 
     # Mods bypass everything
@@ -571,7 +700,7 @@ def general_set_result(mention, user, game_id, url=None, mod=False, result=None)
     if len(game_df) == 0:
         message = f'{mention} Game ID not found, pinging {GRUBBER_MENTION}'
         return message
-    game_dict = {c: game_df[c][0] for c in game_df.columns}
+    game_dict = {str(c): game_df[c][0] for c in game_df.columns}
 
     # Verify the user has a real chess.com username
     user_data = LDB.get_user_data(user.id)
@@ -918,68 +1047,6 @@ async def mod_request_substitute_next(
     await ctx.send(message)
 
 ############################### Other commands
-"""
-async def general_schedule(mention, user, game_datetime, time_zone):
-
-    game_date = datetime.datetime.fromisoformat(game_datetime)
-
-    game_time =
-
-    rules = [
-        game_date.count('-') == 2,
-        game_time.count(':') == 1,
-    ]
-    date_split = game_date.split('-')
-    time_split = game_time.split(':')
-    rules.extend([d.isdigit() for d in date_split])
-    rules.extend([t.isdigit() for t in time_split])
-
-    if not all(rules):
-        message = (
-            f'{mention} Incorrect datetime format.  Please use `YYYY-MM-DD HH:MM`'
-        )
-
-    game_time = datetime.datetime(
-        'year': year,
-        'month': month,
-        'day': day,
-        'hour': hour,
-        'minute': minute,
-        'second':
-    )
-
-    df = LDB.get_league_info(season_name, user.id)
-    if len(df) == 0:
-        message = (
-            f'{mention} user {user.mention} is not currently signed up '
-            f'for the rapid league `{season_name}` season'
-        )
-    else:
-        LDB.league_leave(season_name, user.id)
-        message = (
-            f'{mention} user {user.mention} has left the '
-            f'rapid league `{season_name}` season'
-        )
-    return message
-
-@commands.command(name='leave_next')
-async def user_leave_next(ctx):
-    '''To leave the upcoming rapid league season'''
-    user = ctx.message.author
-    mention = user.mention
-    season_name = fgg.get_month(1)
-    message = await general_leave(mention, user, season_name)
-    await ctx.send(message)
-
-@commands.command(name='mod_leave_next')
-@commands.has_any_role(*MODERATOR_ROLES)
-async def mod_leave_next(ctx, discord_mention: discord.Member):
-    '''Remove user from upcoming league'''
-    mention = ctx.message.author.mention
-    season_name = fgg.get_month(1)
-    message = await general_leave(mention, discord_mention, season_name)
-    await ctx.send(message)
-"""
 
 @commands.command(name='test')
 async def test(ctx):

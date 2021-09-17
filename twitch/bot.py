@@ -35,7 +35,7 @@ with Observer("username", TWITCH_TOKEN) as observer:
                             engine.say(text)
                             engine.runAndWait()
 
-        except KeyboardInterrupt:
+        except Exception as e:
             observer.leave_channel(channel)
             observer.stop()
             quit()

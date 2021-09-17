@@ -128,6 +128,8 @@ def main():
     bot.add_command(fdd.mod_leave_current)
 
     # Setting results
+    bot.add_command(fdd.user_schedule)
+    bot.add_command(fdd.mod_schedule)
     bot.add_command(fdd.user_set_result)
     bot.add_command(fdd.mod_set_result)
     bot.add_command(fdd.mod_custom_result)
