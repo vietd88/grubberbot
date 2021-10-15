@@ -84,10 +84,10 @@ def update_discord_names(guild):
 
 async def announce_pairing(bot, guild):
     season_name = fgg.get_month(0)
-    week_num = 3
+    week_num = 1
 
     df = LDB.get_games_by_week(season_name, week_num)
-    channel = discord.utils.get(guild.channels, name='league-scheduling')
+    channel = discord.utils.get(guild.channels, name='📆-league-scheduling')
 
     rows = [row for row in df.itertuples()]
     for row in rows:
@@ -105,7 +105,7 @@ async def announce_pairing(bot, guild):
         )
         LDB.set_thread_id(row.game_id, thread.id)
         message = (
-            'Hi! September Rapid League Week 3 has started, please use '
+            'Hi! October Rapid League Week 1 has started, please use '
             'this thread so I can help you.  This thread is for:\n'
             '* **Scheduling your rapid game**  Any conversation outside of this '
             'thread cannot be regulated by moderators, please do all of your '
@@ -120,7 +120,7 @@ async def announce_pairing(bot, guild):
             f'<@{row.black_discord_id}> will play black\n'
             'See the pairings online: https://docs.google.com/spreadsheets/d/1SFH7ntDpDW7blX_xBU_m_kSmvY2tLXkuwq-TOM9wyew/edit#gid=2039965781\n\n'
             'Some more things:\n'
-            '* You have until **September 23rd 11:59pm ET** to play your game.\n'
+            '* You have until **October 9th 11:59pm ET** to play your game.\n'
             '* If you need a substitute please ask in the #league-moderation room.\n'
             '* Contact your opponent as soon as possible.  If you wait too '
             'long to contact your opponent, a substitute will be called to '
@@ -220,23 +220,24 @@ def gen_season_info(season_name):
     point_dict = {1: 3, 0: 1, -1: 0}
     game_df = game_df[[(r in point_dict) for r in game_df['result']]]
     gdfs = []
-    for color in ['white', 'black']:
-        gdf = game_df[[
-            'game_id',
-            'schedule',
-            'url',
-        ]]
-        if color == 'white':
-            gdf['result'] = [point_dict[int(r)] for r in game_df['result']]
-        else:
-            gdf['result'] = [point_dict[int(r)*(-1)] for r in game_df['result']]
-        gdf['member_id'] = game_df[f'{color}_member_id']
-        gdf['week_num'] = game_df[f'{color}_week_num']
-        gdf['discord_id'] = game_df[f'{color}_discord_id']
-        gdf['discord_name'] = game_df[f'{color}_discord_name']
-        gdf['chesscom'] = game_df[f'{color}_chesscom']
-        gdfs.append(gdf)
-    game_df = pd.concat(gdfs)
+    if len(game_df):
+        for color in ['white', 'black']:
+            gdf = game_df[[
+                'game_id',
+                'schedule',
+                'url',
+            ]]
+            if color == 'white':
+                gdf['result'] = [point_dict[int(r)] for r in game_df['result']]
+            else:
+                gdf['result'] = [point_dict[int(r)*(-1)] for r in game_df['result']]
+            gdf['member_id'] = game_df[f'{color}_member_id']
+            gdf['week_num'] = game_df[f'{color}_week_num']
+            gdf['discord_id'] = game_df[f'{color}_discord_id']
+            gdf['discord_name'] = game_df[f'{color}_discord_name']
+            gdf['chesscom'] = game_df[f'{color}_chesscom']
+            gdfs.append(gdf)
+        game_df = pd.concat(gdfs)
 
     df_dict = {
         'team': [],
@@ -249,7 +250,6 @@ def gen_season_info(season_name):
     df_dict.update({f'week {i}': [] for i in range(1, 5)})
     player_dict = {0: 'substitute', 1: 'player'}
     for row in member_df.itertuples():
-        game_subset = game_df[game_df['member_id'] == row.member_id]
         request_subset = request_df[request_df['member_id'] == row.member_id]
         sub_dict = {0: 'no', 1: 'yes'}
         request_dict = {
@@ -263,8 +263,13 @@ def gen_season_info(season_name):
         df_dict['chesscom'].append(row.chesscom)
         df_dict['role'].append(player_dict[row.is_player])
 
-        points = sum(game_subset['result'])
-        total_points = 3*len(game_subset)
+        if len(game_df):
+            game_subset = game_df[game_df['member_id'] == row.member_id]
+            points = sum(game_subset['result'])
+            total_points = 3*len(game_subset)
+        else:
+            points = 0
+            total_points = 0
         df_dict['points'].append(f'{points}/{total_points}')
         for i in range(1, 5):
             if i in request_dict:
@@ -521,8 +526,7 @@ async def mod_join_substitute(ctx, user: discord.Member, join_type: str):
     await ctx.send(message)
 
 async def general_leave(mention, user, season_name):
-    df = LDB.get_league_info(season_name, user.id)
-    if len(df) == 0:
+    if not LDB.is_member(season_name, user.id):
         message = (
             f'{mention} user {user.mention} is not currently signed up '
             f'for the rapid league `{season_name}` season'
@@ -961,8 +965,7 @@ async def general_request_substitute(
 
     # Verify that the user is signed up for the season
     season_name = fgg.get_month(int(is_next_season))
-    df = LDB.get_league_info(season_name, user.id)
-    if len(df) == 0:
+    if not LDB.is_member(season_name, user.id):
         message = (
             f'{mention} User {user.mention} is not signed up for '
             f'the Rapid League `{season_name}` season'

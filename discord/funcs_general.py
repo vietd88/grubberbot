@@ -50,7 +50,7 @@ def arr_to_sheet(arr, sheet=0):
     sheet_array = sheet_array + [
         ['' for _ in range(row_length)] for _ in range(100)
     ]
-    sheet_array = [row + ['' for _ in range(10)] for row in sheet_array]
+    sheet_array = [row + ['' for _ in range(100)] for row in sheet_array]
     sheet.update(sheet_array)
 
 def gen_df_to_sheet(df, title=None):
