@@ -14,7 +14,7 @@ SCOPES = [
     'https://www.googleapis.com/auth/drive',
 ]
 
-SERVICE_ACCOUNT_FILE = 'data/grubberbot-2f9a174696fa.json'
+SERVICE_ACCOUNT_FILE = 'credentials/grubberbot-2f9a174696fa.json'
 CALENDAR_ID ='sk73kniat254fng6gn59u0pebc@group.calendar.google.com'
 TIME_ZONE_WEBSITE = 'https://en.wikipedia.org/wiki/List_of_tz_database_time_zones'
 
