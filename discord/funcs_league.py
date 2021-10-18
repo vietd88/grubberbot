@@ -1305,11 +1305,11 @@ def backup_databases():
 if __name__ == '__main__':
     LDB = LeagueDatabase()
     season_name = fgg.get_month()
-    week_num = 1
+    week_num = 3
     team_names = ['Team Nepomniachtchi', 'Team Carlsen']
 
-    print(LDB.get_season_games(season_name))
-    raise Exception
+    #print(LDB.get_season_games(season_name))
+    #raise Exception
 
     if True:
         print(LDB.get_games_by_week(season_name, week_num))

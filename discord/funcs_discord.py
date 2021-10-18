@@ -84,7 +84,7 @@ def update_discord_names(guild):
 
 async def announce_pairing(bot, guild):
     season_name = fgg.get_month(0)
-    week_num = 1
+    week_num = 3
 
     df = LDB.get_games_by_week(season_name, week_num)
     channel = discord.utils.get(guild.channels, name='📆-league-scheduling')
@@ -105,7 +105,7 @@ async def announce_pairing(bot, guild):
         )
         LDB.set_thread_id(row.game_id, thread.id)
         message = (
-            'Hi! October Rapid League Week 1 has started, please use '
+            'Hi! October Rapid League Week 3 has started, please use '
             'this thread so I can help you.  This thread is for:\n'
             '* **Scheduling your rapid game**  Any conversation outside of this '
             'thread cannot be regulated by moderators, please do all of your '
@@ -120,7 +120,7 @@ async def announce_pairing(bot, guild):
             f'<@{row.black_discord_id}> will play black\n'
             'See the pairings online: https://docs.google.com/spreadsheets/d/1SFH7ntDpDW7blX_xBU_m_kSmvY2tLXkuwq-TOM9wyew/edit#gid=2039965781\n\n'
             'Some more things:\n'
-            '* You have until **October 9th 11:59pm ET** to play your game.\n'
+            '* You have until **October 23rd 11:59pm ET** to play your game.\n'
             '* If you need a substitute please ask in the #league-moderation room.\n'
             '* Contact your opponent as soon as possible.  If you wait too '
             'long to contact your opponent, a substitute will be called to '

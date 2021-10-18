@@ -22,7 +22,7 @@ WORKDIR /usr/src/app
 
 FROM base AS develop
 COPY . .
-CMD ["python3.8", "develop.py"]
+CMD ["python3.8", "funcs_league.py"]
 
 FROM base AS test
 COPY . .
