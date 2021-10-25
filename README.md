@@ -10,12 +10,15 @@
 2. Install docker https://docs.docker.com/get-docker/
    - Make sure docker-compose is installed with the command `docker-compose version`
 3. Open a command line prompt and navigate to the grubberbot directory
-4. Build the application with two commands
+   4. Build the application
     ```
     docker-compose up --build --detach --force-recreate --remove-orphans
+    ```
+   5. In between builds make sure to remove dangling images
+    ```
     docker image prune --force --all
     ```
-5. Shut down the application when you are done
+   5. Shut down the application when you are done
     ```
     docker-compose down
     ```
@@ -24,3 +27,8 @@
    2. Activate your environment with some command like `conda activate py38`
    3. Open your git GUI from this environment.  I use GitHub Desktop, the command for me is `github` to launch the application.
    4. Do your `git` commands using the GUI that you've opened.
+
+## To run the bot in production
+```
+docker-compose -f docker-compose-production.yml up --build --force-recreate --remove-orphans
+```

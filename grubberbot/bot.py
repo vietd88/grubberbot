@@ -71,7 +71,10 @@ def set_league(discord_id, join_type):
 @bot.event
 async def on_ready():
     guild = discord.utils.get(bot.guilds, name=GUILD_NAME)
-    print(f"Bot {bot.user.name} has connected to {guild.name}")
+    message = f"{bot.user.mention} has connected to {guild.name}"
+    print(message)
+    channel = discord.utils.get(guild.channels, name="logs")
+    await channel.send(message)
     fdd.update_google_sheet()
     # await fdd.announce_pairing(bot, guild)
 
