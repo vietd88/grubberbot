@@ -20,16 +20,17 @@ SERVICE_ACCOUNT_FILE = "credentials/google_credentials.json"
 CALENDAR_ID = "sk73kniat254fng6gn59u0pebc@group.calendar.google.com"
 TIME_ZONE_WEBSITE = "https://en.wikipedia.org/wiki/List_of_tz_database_time_zones"
 
-CREDENTIALS = service_account.Credentials.from_service_account_file(
-    SERVICE_ACCOUNT_FILE,
-    scopes=SCOPES,
-)
+if os.path.exists(SERVICE_ACCOUNT_FILE):
+    CREDENTIALS = service_account.Credentials.from_service_account_file(
+        SERVICE_ACCOUNT_FILE,
+        scopes=SCOPES,
+    )
 
-service = gc_build(
-    "calendar",
-    "v3",
-    credentials=CREDENTIALS,
-)
+    service = gc_build(
+        "calendar",
+        "v3",
+        credentials=CREDENTIALS,
+    )
 
 
 def add_event(event_name, start, end, time_zone):

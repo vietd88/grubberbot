@@ -12,7 +12,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v2
 
-    - name: Build the docker-compose stack
+    - name: Build docker-compose to run unit tests
       run: docker-compose up --build --force-recreate --remove-orphans
 
     - name: Check running containers
