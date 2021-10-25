@@ -9,7 +9,7 @@ pyarrow==4.0.0
 python-dotenv==0.19.0
 pytz==2021.1
 pyyaml==6.0
-pyyaml=6.0
+pyyaml==6.0
 setuptools
 tqdm==4.60.0
 typing-extensions==3.7.4.3

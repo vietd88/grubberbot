@@ -6,4 +6,4 @@ services:
       target: ${STAGE}
     image: bot:${STAGE}
     volumes:
-      - ./test:/usr/src/app
+      - ./grubberbot:/usr/src/app
