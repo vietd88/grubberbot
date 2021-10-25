@@ -5,7 +5,7 @@
 *.parquet
 *.bz2
 *.pyc
-test*
+test/*
 
 # Credential files
 bot/credentials/discord.yml
