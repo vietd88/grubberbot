@@ -3,7 +3,7 @@ import gspread
 import numpy as np
 import pandas as pd
 
-GOOGLE_TOKEN = "credentials/grubberbot-2f9a174696fa.json"
+GOOGLE_TOKEN = "credentials/google_credentials.json"
 GOOGLE_SHEET_NAME = "1SFH7ntDpDW7blX_xBU_m_kSmvY2tLXkuwq-TOM9wyew"
 
 REFRESH_MESSAGE = "Hi! Looks like "
