@@ -1,6 +1,5 @@
 import os
 import sys
-from dotenv import load_dotenv
 import json
 import discord
 from discord.ext import commands
@@ -9,6 +8,7 @@ import logging
 import datetime
 from typing import Optional
 import pandas as pd
+import yaml
 
 import funcs_league as flg
 import funcs_discord as fdd
@@ -45,9 +45,11 @@ MODERATOR_ROLES = [
 # Declare variables
 GUILD_NAME = "pawngrubber's server"
 
-# Read secret information from .env file
-load_dotenv()
-DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
+# Read secret information from yaml file
+DISCORD_TOKEN_LOCATION = 'credentials/discord.yml'
+with open(DISCORD_TOKEN_LOCATION, 'r') as f:
+    data = yaml.safe_load(f)
+DISCORD_TOKEN = data['DISCORD_TOKEN']
 
 # The bot
 bot = commands.Bot(command_prefix='!')

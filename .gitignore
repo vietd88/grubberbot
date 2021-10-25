@@ -5,3 +5,8 @@
 *.parquet
 *.bz2
 *.pyc
+test*
+
+# Credential files
+bot/credentials/discord.yml
+bot/credentials/grubberbot-2f9a174696fa.json

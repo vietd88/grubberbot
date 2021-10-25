@@ -6,4 +6,4 @@ services:
       target: test
     image: bot:test
     volumes:
-      - .:/usr/src/app
+      - ./test:/usr/src/app
