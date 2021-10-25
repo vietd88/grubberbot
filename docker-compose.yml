@@ -3,7 +3,7 @@ services:
   bot:
     build:
       context: .
-      target: test
-    image: bot:test
+      target: ${STAGE}
+    image: bot:${STAGE}
     volumes:
       - ./test:/usr/src/app

@@ -14,3 +14,6 @@ pytz==2021.1
 gspread==4.0.1
 numpy==1.19.5
 google-api-python-client==2.20.0
+pyyaml=6.0
+
+pre-commit

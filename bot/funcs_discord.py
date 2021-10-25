@@ -64,6 +64,9 @@ DISPLAY_RESULT = {
     -1: '0-1',
 }
 
+def test_unittest():
+    return True
+
 LDB = flg.LeagueDatabase()
 
 ################ General commands
