@@ -7,3 +7,7 @@ docker build --pull --no-cache --tag test-grubberbot .
 docker build --tag test-grubberbot .
 
 --still writing steps
+
+docker-compose up --build --detach --force-recreate --remove-orphans && docker image prune --force --all
+
+docker-compose up --build --force-recreate --remove-orphans

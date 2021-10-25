@@ -19,15 +19,13 @@ RUN git clone https://github.com/Rapptz/discord.py
 WORKDIR /usr/src/app/discord.py
 RUN python3.8 -m pip install -U .[voice]
 WORKDIR /usr/src/app
+WORKDIR /usr/src/app
 
 FROM base AS develop
-COPY . .
-#CMD ["python3.8", "develop.py"]
+CMD ["python3.8", "develop.py"]
 
 FROM base AS test
-COPY . .
 CMD ["python3.8", "test.py"]
 
 FROM base AS production
-COPY . .
-#CMD ["python4.8", "production.py"]
+CMD ["python3.8", "production.py"]

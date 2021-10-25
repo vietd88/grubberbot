@@ -1,6 +1,9 @@
-version: "3.8"
-
+version: "3.9"
 services:
-    app:
-        image: test-grubberbot
-        command:
+  bot:
+    build:
+      context: .
+      target: test
+    image: bot:test
+    volumes:
+      - .:/usr/src/app
