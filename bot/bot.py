@@ -15,15 +15,15 @@ import funcs_discord as fdd
 import funcs_general as fgg
 
 logging.basicConfig(
-    filename='grubberbot.log',
+    filename="grubberbot.log",
     level=logging.INFO,
-    format='%(asctime)s %(message)s',
-    datefmt='%m/%d/%Y %I:%M:%S %p',
+    format="%(asctime)s %(message)s",
+    datefmt="%m/%d/%Y %I:%M:%S %p",
 )
 MODERATOR_ROLES = [
-    'The Grubber',
-    'Mods',
-    'Cool People',
+    "The Grubber",
+    "Mods",
+    "Cool People",
 ]
 
 # TODO: sql injection problem
@@ -32,7 +32,7 @@ MODERATOR_ROLES = [
 # TODO: !info command
 # TODO: ping users before a season starts to make sure they're active on discord
 
-'''
+"""
 !list_commands
 
 # for scheduling a game
@@ -40,35 +40,39 @@ MODERATOR_ROLES = [
 
 !league_schedule_game <date and time> - schedule a game, somehow i'll require confirmation from both players
 !mod_league_schedule_game <@someone> <date and time> - schedule a game without requiring confirmation
-'''
+"""
 
 # Declare variables
 GUILD_NAME = "pawngrubber's server"
 
 # Read secret information from yaml file
-DISCORD_TOKEN_LOCATION = 'credentials/discord.yml'
-with open(DISCORD_TOKEN_LOCATION, 'r') as f:
+DISCORD_TOKEN_LOCATION = "credentials/discord.yml"
+with open(DISCORD_TOKEN_LOCATION, "r") as f:
     data = yaml.safe_load(f)
-DISCORD_TOKEN = data['DISCORD_TOKEN']
+DISCORD_TOKEN = data["DISCORD_TOKEN"]
 
 # The bot
-bot = commands.Bot(command_prefix='!')
+bot = commands.Bot(command_prefix="!")
 
 # Database stuff
 LDB = flg.LeagueDatabase()
+
+
 def set_league(discord_id, join_type):
     LDB.league_join(
         fgg.get_month(1),
         discord_id,
-        join_type=='player',
+        join_type == "player",
     )
+
 
 @bot.event
 async def on_ready():
     guild = discord.utils.get(bot.guilds, name=GUILD_NAME)
-    print(f'Bot {bot.user.name} has connected to {guild.name}')
+    print(f"Bot {bot.user.name} has connected to {guild.name}")
     fdd.update_google_sheet()
-    #await fdd.announce_pairing(bot, guild)
+    # await fdd.announce_pairing(bot, guild)
+
 
 @bot.event
 async def on_command_error(ctx, error):
@@ -76,33 +80,35 @@ async def on_command_error(ctx, error):
     if message is not None:
         await ctx.send(message)
 
+
 @bot.event
 async def on_command_completion(ctx):
     fdd.update_google_sheet()
 
-@commands.command(name='commands')
+
+@commands.command(name="commands")
 async def user_commands(ctx):
-    '''List all user commands available to GrubberBot'''
+    """List all user commands available to GrubberBot"""
     message = [
-        f'`!{command}`'
+        f"`!{command}`"
         for command in bot.commands
-        if not str(command).startswith('mod')
+        if not str(command).startswith("mod")
     ]
     message = sorted(message)
-    message = '\n'.join(message)
+    message = "\n".join(message)
     await ctx.send(message)
 
-@commands.command(name='mod_commands')
+
+@commands.command(name="mod_commands")
 async def mod_commands(ctx):
-    '''List all mod commands available to GrubberBot'''
+    """List all mod commands available to GrubberBot"""
     message = [
-        f'`!{command}`'
-        for command in bot.commands
-        if str(command).startswith('mod')
+        f"`!{command}`" for command in bot.commands if str(command).startswith("mod")
     ]
     message = sorted(message)
-    message = '\n'.join(message)
+    message = "\n".join(message)
     await ctx.send(message)
+
 
 def main():
 
@@ -120,7 +126,7 @@ def main():
     bot.add_command(fdd.user_join_substitute)
     bot.add_command(fdd.user_join_current)
     bot.add_command(fdd.user_leave_next)
-    #bot.add_command(fdd.user_leave_current)
+    # bot.add_command(fdd.user_leave_current)
 
     bot.add_command(fdd.mod_set_chesscom)
     bot.add_command(fdd.mod_join_player)
@@ -147,5 +153,6 @@ def main():
 
     bot.run(DISCORD_TOKEN)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()
