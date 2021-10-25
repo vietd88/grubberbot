@@ -1,6 +1,12 @@
 # grubberbot
 ## Steps for setting up development
-1. Clone this repository
+1. Install python
+2. Clone this repository
+3. Install development environment
+```
+pip install -r requirements-dev.txt
+pre-commit install
+```
 2. Install docker https://docs.docker.com/get-docker/
    - Make sure docker-compose is installed with the command `docker-compose version`
 3. Open a command line prompt and navigate to the grubberbot directory
