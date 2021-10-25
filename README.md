@@ -11,14 +11,14 @@
    - Make sure docker-compose is installed with the command `docker-compose version`
 3. Open a command line prompt and navigate to the grubberbot directory
 4. Build the application with two commands
-```
-docker-compose up --build --detach --force-recreate --remove-orphans
-docker image prune --force --all
-```
+    ```
+    docker-compose up --build --detach --force-recreate --remove-orphans
+    docker image prune --force --all
+    ```
 5. Shut down the application when you are done
-```
-docker-compose down
-```
+    ```
+    docker-compose down
+    ```
 6. If you are using Python through Anaconda (or some other environment) an error may be raised by using git without being in that environment.  Bug is documented here https://github.com/conda-forge/pre-commit-feedstock/issues/9 The easiest fix is to use git from the environment.  For example, I use python through Anaconda and here are the steps I use:
    1. Open Anaconda prompt
    2. Activate your environment with some command like `conda activate py38`
