@@ -8,5 +8,5 @@
 foo/*
 
 # Credential files
-bot/credentials/discord.yml
-bot/credentials/grubberbot-2f9a174696fa.json
+grubberbot/credentials/discord.yml
+grubberbot/credentials/grubberbot-2f9a174696fa.json
