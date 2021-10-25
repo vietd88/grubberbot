@@ -20,6 +20,7 @@ WORKDIR /usr/src/app/discord.py
 RUN python3.8 -m pip install -U .[voice]
 WORKDIR /usr/src/app
 
+# Test
 FROM base AS test
 CMD ["python3.8", "-m", "unittest", "discover", "-v"]
 
