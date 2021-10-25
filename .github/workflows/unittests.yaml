@@ -1,0 +1,19 @@
+# Run python unit tests
+
+name: Unit Tests
+
+on: [push, pull_request]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+
+    - name: Checkout code
+      uses: actions/checkout@v2
+
+    - name: Build the docker-compose stack
+      run: docker-compose up --build --force-recreate --remove-orphans
+
+    - name: Check running containers
+      run: docker ps -a
