@@ -19,3 +19,8 @@ docker image prune --force --all
 ```
 docker-compose down
 ```
+6. If you are using Python through Anaconda (or some other environment) an error may be raised by using git without being in that environment.  Bug is documented here https://github.com/conda-forge/pre-commit-feedstock/issues/9 The easiest fix is to use git from the environment.  For example, I use python through Anaconda and here are the steps I use:
+   1. Open Anaconda prompt
+   2. Activate your environment with some command like `conda activate py38`
+   3. Open your git GUI from this environment.  I use GitHub Desktop, the command for me is `github` to launch the application.
+   4. Do your `git` commands using the GUI that you've opened.
