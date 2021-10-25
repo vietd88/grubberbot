@@ -3,7 +3,7 @@ services:
   bot:
     build:
       context: .
-      target: ${STAGE}
-    image: bot:${STAGE}
+      target: test
+    image: bot:test
     volumes:
       - ./grubberbot:/usr/src/app
