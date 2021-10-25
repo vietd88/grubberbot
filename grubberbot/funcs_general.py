@@ -1,4 +1,5 @@
 import datetime
+
 import gspread
 import numpy as np
 import pandas as pd
@@ -13,7 +14,7 @@ def get_month(month_delta=0, to_str=True):
     date = datetime.datetime.now()
     date = date.replace(day=1)
 
-    for i in range(abs(month_delta)):
+    for _ in range(abs(month_delta)):
         if month_delta > 0:
             delta = datetime.timedelta(31)
         elif month_delta < 0:

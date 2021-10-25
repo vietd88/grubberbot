@@ -1,31 +1,31 @@
+import datetime
+import json
+import os
+import random
+import re
+import sqlite3
+import string
+import time
 import urllib
 import urllib.error
 import urllib.request
-import json
-import os
-import datetime
 from pprint import pprint
-import sqlite3
-import numpy as np
-import string
-import random
-import pandas as pd
-from tqdm import tqdm
-import time
-import random
-import chessdotcom as cdc
+
 import chess
 import chess.pgn
-import re
-
+import chessdotcom as cdc
 import funcs_chesscom as fcc
 import funcs_general as fgg
+import numpy as np
+import pandas as pd
+from tqdm import tqdm
 
 # TODO: don't let a player sit out more than one game a season
 # TODO: set iter time to be higher
 # TODO: store thread
 # TODO: store week number
 # TODO: refresh discord names
+# TODO: use sqlalchemy instead of raw sql
 
 GENERAL_ERROR_MESSAGE = "{} `!{}` error, get help with `!help {}`"
 
@@ -307,8 +307,14 @@ class LeagueDatabase:
 
         INSERT INTO game(white_seed_id, black_seed_id)
         VALUES(
-            (SELECT s.id FROM seed_subset AS s WHERE s.sub_member_id IN white_member_ids),
-            (SELECT s.id FROM seed_subset AS s WHERE s.sub_member_id IN black_member_ids),
+            (
+                SELECT s.id FROM seed_subset AS s
+                WHERE s.sub_member_id IN white_member_ids
+            ),
+            (
+                SELECT s.id FROM seed_subset AS s
+                WHERE s.sub_member_id IN black_member_ids
+            ),
         )
         ;"""
 
@@ -393,7 +399,7 @@ class LeagueDatabase:
         params = (season_name, team, discord_id, is_player)
         try:
             self.cur.execute(sql, params)
-        except sqlite3.IntegrityError as e:
+        except sqlite3.IntegrityError:
             return
 
         # Create seeds for the player
@@ -559,7 +565,6 @@ class LeagueDatabase:
         rant_df_ids = [int(i) for i in rant_df["discord_id"]]
         nort_df_ids = [int(i) for i in nort_df["discord_id"]]
 
-        teams = ["Team Carlsen", "Team Nepomniachtchi"]
         games_df = self.get_season_games(season_name)
         game_history = []
         for row in games_df.itertuples():
@@ -614,8 +619,8 @@ class LeagueDatabase:
             iter_count = 1
             while time.time() - start < 4:
                 counter += 1
-                old_rant_inds = [r for r in rant_inds]
-                old_nort_inds = [r for r in nort_inds]
+                old_rant_inds = list(rant_inds)
+                old_nort_inds = list(nort_inds)
                 iter_count += 0.01
                 for _ in range(int(iter_count)):
                     if random.random() < 0.5:
@@ -1129,7 +1134,7 @@ def even_split(df, team_names, iter_time=10, verbose=False):
     while time.time() - start < iter_time:
 
         # Shuffle splits, preserve old splits if things go wrong
-        old_splits = [[i for i in j] for j in splits]
+        old_splits = [list(j) for j in splits]
         old_score = score
         for _ in range(101):
             a, b = [int(i) for i in random.sample(range(num_teams), 2)]
@@ -1153,7 +1158,7 @@ def even_split(df, team_names, iter_time=10, verbose=False):
                         )
                 if verbose:
                     print()
-                new_splits = [[i for i in j] for j in splits]
+                new_splits = [list(j) for j in splits]
         if score < old_score:
             splits = new_splits
             old_score = score
@@ -1206,7 +1211,6 @@ def read_history():
     for s in skip_prefixes:
         unique = [u for u in unique if not u.startswith(s)]
 
-    e_text = ""
     LDB = LeagueDatabase()
 
     def title_to_game_id(title):
@@ -1251,7 +1255,7 @@ def read_history():
                     "game_id": game_id,
                     "url": split[1],
                 }
-            except IndexError as e:
+            except IndexError:
                 continue
             pprint(elem)
             msg = fdd.league_set_result(**elem)
@@ -1259,7 +1263,10 @@ def read_history():
             print()
             # LDB.set_result(**elem)
         """
-        if row.text.startswith('!set_chesscom') or row.text.startswith('!link_chesscom'):
+        if (
+            row.text.startswith('!set_chesscom')
+            or row.text.startswith('!link_chesscom')
+        ):
             if len(split) > 1:
                 if exists_chesscom(split[1]):
                     LDB.set_chesscom(row.id, row.name, split[1])
@@ -1313,7 +1320,10 @@ if __name__ == "__main__":
         print(LDB.get_games_by_week(season_name, week_num))
         sql = """
         WITH season_ids AS (SELECT s.id FROM season AS s WHERE s.name = ?),
-        week_ids AS (SELECT w.id FROM week AS w WHERE w.num = ? AND w.season_id in season_ids),
+        week_ids AS (
+            SELECT w.id FROM week AS w
+            WHERE w.num = ? AND w.season_id in season_ids
+        ),
         seed_ids AS (SELECT s.id FROM seed AS s WHERE s.week_id IN week_ids)
         DELETE FROM game
         WHERE game.black_seed_id IN seed_ids OR game.white_seed_id IN seed_ids
