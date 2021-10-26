@@ -4,7 +4,8 @@ import subprocess
 HOME = "/home/pawngrubber"
 LOG = f"{HOME}/log.txt"
 COMMANDS = [
-    "sudo git pull",
+    "sudo git fetch --all",
+    "sudo git reset --hard origin/production",
     "sudo python3.8 -m pip install -r requirements-dev.txt",
     "sudo docker image prune --force --all",
     (

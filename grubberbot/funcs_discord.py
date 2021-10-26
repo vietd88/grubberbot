@@ -1114,7 +1114,9 @@ async def mod_request_substitute_next(
 @commands.has_any_role(*MODERATOR_ROLES)
 async def reboot(ctx):
     """Reboot GrubberBot, which also pulls the latest from production"""
-    await ctx.send("Rebooting...")
+    await ctx.send("Backing up database...")
+    fgo.backup_db()
+    await ctx.send("Database backed up, rebooting now...")
     subprocess.run("sudo reboot", shell=True, cwd=".", capture_output=True)
 
 
