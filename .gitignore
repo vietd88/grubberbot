@@ -237,3 +237,5 @@ foo/*
 # Credential files
 grubberbot/credentials/discord.yml
 grubberbot/credentials/google_credentials.json
+grubberbot/credentials/*
+*.sqlite3

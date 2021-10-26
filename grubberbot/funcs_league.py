@@ -16,6 +16,7 @@ import chess.pgn
 import chessdotcom as cdc
 import funcs_chesscom as fcc
 import funcs_general as fgg
+import funcs_google as fgo
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
@@ -34,6 +35,8 @@ NEXT_MONTH = 0
 LEAGUE_DB = "data/rapid_league.sqlite3"
 SIGNUP_TEAM = "signup"
 CORRUPTED_TEAM = "corrupted"
+
+fgo.download_db()
 
 
 class LeagueDatabase:

@@ -4,7 +4,12 @@
 2. Clone this repository
 3. Install development environment
     ```
+    pip install --upgrade pip
     pip install -r requirements-dev.txt
+    ```
+4. Install `pre-commit`.  
+   - NOTE: if `git` is not on your `PATH`, you need to add it.  For me using GitHub Desktop on Windows, `git.exe` is located at `C:\Users\<username>\AppData\Local\GitHubDesktop\app-<appversion>\resources\app\git\cmd\git.exe`  PS: AppData is a hidden folder by default.
+    ```
     pre-commit install
     ```
 2. Install docker https://docs.docker.com/get-docker/
@@ -12,7 +17,7 @@
 3. Open a command line prompt and navigate to the grubberbot directory
    4. Build the application
     ```
-    docker-compose up --build --detach --force-recreate --remove-orphans
+    docker-compose up --build --force-recreate --remove-orphans
     ```
    5. In between builds make sure to remove dangling images
     ```

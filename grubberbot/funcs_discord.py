@@ -13,7 +13,7 @@ import funcs_league as flg
 import numpy as np
 import pandas as pd
 import pytz
-from discord.ext import commands
+from discord.ext import commands, tasks
 from dotenv import load_dotenv
 from tqdm import tqdm
 
@@ -70,6 +70,13 @@ def test_unittest():
 
 
 LDB = flg.LeagueDatabase()
+
+
+@tasks.loop(seconds=60.0)
+async def regular_backup():
+    pass
+    # async with self.lock:
+    # await self.do_bulk()
 
 
 # General commands

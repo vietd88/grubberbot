@@ -5,6 +5,7 @@ import os.path
 from pprint import pprint
 
 from google.auth.transport.requests import Request
+from google.cloud import storage
 from google.oauth2 import service_account
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -19,6 +20,7 @@ SCOPES = [
 SERVICE_ACCOUNT_FILE = "credentials/google_credentials.json"
 CALENDAR_ID = "sk73kniat254fng6gn59u0pebc@group.calendar.google.com"
 TIME_ZONE_WEBSITE = "https://en.wikipedia.org/wiki/List_of_tz_database_time_zones"
+DB_PATH = "data/rapid_league.sqlite3"
 
 if os.path.exists(SERVICE_ACCOUNT_FILE):
     CREDENTIALS = service_account.Credentials.from_service_account_file(
@@ -98,7 +100,54 @@ def delete_event_by_id(event_id):
     service.events().delete(calendarId=CALENDAR_ID, eventId=event_id).execute()
 
 
+def upload_to_bucket(blob_filename, local_filename, bucket_name):
+    """Upload data to a bucket"""
+
+    # Explicitly use service account credentials by specifying the private key file
+    storage_client = storage.Client.from_service_account_json(SERVICE_ACCOUNT_FILE)
+    bucket = storage_client.get_bucket(bucket_name)
+    blob = bucket.blob(blob_filename)
+    blob.upload_from_filename(local_filename)
+
+    # returns a public url
+    return blob.public_url
+
+
+def backup_db():
+    if not os.path.exists(DB_PATH):
+        return
+
+    timestamp = datetime.datetime.now(datetime.timezone.utc)
+    timestamp = timestamp.isoformat(" ", "seconds")
+    timestamp = timestamp.replace(" ", "_")
+
+    upload_to_bucket(
+        f"sqlite_backup/{timestamp}_UTC.sqlite3",
+        DB_PATH,
+        "grubberbot_backup",
+    )
+
+    upload_to_bucket(
+        "rapid_league.sqlite3",
+        DB_PATH,
+        "grubberbot_backup",
+    )
+
+
+def download_db():
+    if os.path.exists(DB_PATH):
+        return
+
+    bucket_name = "grubberbot_backup"
+    storage_client = storage.Client.from_service_account_json(SERVICE_ACCOUNT_FILE)
+    bucket = storage_client.get_bucket(bucket_name)
+    blob = bucket.blob("rapid_league.sqlite3")
+    blob.download_to_filename(DB_PATH)
+    print("downloaded DB")
+
+
 def main():
+    """
     now = datetime.datetime.now()
     start = now + datetime.timedelta(1)
     end = now + datetime.timedelta(1, 1)
@@ -115,6 +164,7 @@ def main():
     events = get_next_10_events()
     print()
     print_events(events)
+    """
 
 
 if __name__ == "__main__":
