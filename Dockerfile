@@ -20,14 +20,11 @@ WORKDIR /usr/src/app/discord.py
 RUN python3.8 -m pip install -U .[voice]
 WORKDIR /usr/src/app
 
+FROM base AS test
+CMD ["python3.8", "-m", "unittest", "discover", "-v"]
+
 FROM base AS develop
-COPY . .
 CMD ["python3.8", "develop.py"]
 
-FROM base AS test
-COPY . .
-CMD ["python3.8", "test.py"]
-
 FROM base AS production
-COPY . .
-#CMD ["python4.8", "bot.py"]
+CMD ["python3.8", "bot.py"]

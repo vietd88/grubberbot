@@ -1,0 +1,22 @@
+# Run python unit tests
+
+name: Unit Tests
+
+on: [push, pull_request]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+
+    - name: Checkout code
+      uses: actions/checkout@v2
+
+    - name: Cache Docker
+      run: docker build --target base -t grubberbot:base .
+
+    - name: Build docker-compose to run unit tests
+      run: docker-compose up --build
+
+    - name: Check running containers
+      run: docker ps -a

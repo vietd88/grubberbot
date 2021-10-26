@@ -1,8 +1,0 @@
-1. install docker https://docs.docker.com/get-docker/
-2. clone this repo
-3. open a command line prompt and navigate to this directory
-4. build the docker image
-docker build --pull --no-cache --tag test-grubberbot .
-docker build --tag test-grubberbot .
-
---still writing steps

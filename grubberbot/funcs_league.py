@@ -1,49 +1,52 @@
+import datetime
+import json
+import os
+import random
+import re
+import sqlite3
+import string
+import time
 import urllib
 import urllib.error
 import urllib.request
-import json
-import os
-import datetime
 from pprint import pprint
-import sqlite3
-import numpy as np
-import string
-import random
-import pandas as pd
-from tqdm import tqdm
-import time
-import random
-import chessdotcom as cdc
+
 import chess
 import chess.pgn
-import re
-
+import chessdotcom as cdc
 import funcs_chesscom as fcc
 import funcs_general as fgg
+import funcs_google as fgo
+import numpy as np
+import pandas as pd
+from tqdm import tqdm
 
 # TODO: don't let a player sit out more than one game a season
 # TODO: set iter time to be higher
 # TODO: store thread
 # TODO: store week number
 # TODO: refresh discord names
+# TODO: use sqlalchemy instead of raw sql
 
-GENERAL_ERROR_MESSAGE = '{} `!{}` error, get help with `!help {}`'
+GENERAL_ERROR_MESSAGE = "{} `!{}` error, get help with `!help {}`"
 
 # TODO: Change this to 1
 NEXT_MONTH = 0
-LEAGUE_DB = 'data/rapid_league.sqlite3'
-SIGNUP_TEAM = 'signup'
-CORRUPTED_TEAM = 'corrupted'
+LEAGUE_DB = "data/rapid_league.sqlite3"
+SIGNUP_TEAM = "signup"
+CORRUPTED_TEAM = "corrupted"
+
+fgo.download_db()
+
 
 class LeagueDatabase:
-
     def __init__(self, path=LEAGUE_DB):
         self.path = path
         self.conn = sqlite3.connect(self.path)
         self.cur = self.conn.cursor()
-        self.conn.execute('PRAGMA foreign_keys = 1')
+        self.conn.execute("PRAGMA foreign_keys = 1")
         self.conn.commit()
-        self.init_tables()
+        # self.init_tables()
         self.init_season()
         self.chess_db = fcc.ChesscomDatabase()
 
@@ -55,60 +58,60 @@ class LeagueDatabase:
         output = self.conn.execute(sql)
         df_dict = {}
         for table in output.fetchall():
-            df = pd.read_sql_query(f'SELECT * FROM {table[0]}', self.conn)
+            df = pd.read_sql_query(f"SELECT * FROM {table[0]}", self.conn)
             df_dict[table[0]] = df
         return df_dict
 
     def init_tables(self):
 
         # Users, id is their discord id
-        user_tbl_sql = '''
+        user_tbl_sql = """
         CREATE TABLE IF NOT EXISTS user(
             id integer PRIMARY KEY,
             discord_id integer NOT NULL UNIQUE,
             discord_name text NOT NULL,
             chesscom text
-        );'''
+        );"""
 
         # Seasons, name is the name of the season
-        season_tbl_sql = '''
+        season_tbl_sql = """
         CREATE TABLE IF NOT EXISTS season(
             id integer PRIMARY KEY,
             name text NOT NULL UNIQUE,
             week_num INTEGER NOT NULL DEFAULT 0
-        );'''
+        );"""
 
         # Teams, name is the name of the team. team 'signup' is not yet assigned
-        team_tbl_sql = '''
+        team_tbl_sql = """
         CREATE TABLE IF NOT EXISTS team(
             id integer PRIMARY KEY,
             season_id integer NOT NULL REFERENCES season(id),
             name text NOT NULL,
             discord_id INTEGER NOT NULL DEFAULT 0,
             UNIQUE(season_id, name)
-        );'''
+        );"""
 
         # Membership, bridge table from users to teams (many to many)
-        member_tbl_sql = '''
+        member_tbl_sql = """
         CREATE TABLE IF NOT EXISTS member(
             id integer PRIMARY KEY,
             user_id integer NOT NULL REFERENCES user(id),
             team_id integer NOT NULL REFERENCES team(id) ON UPDATE CASCADE,
             is_player integer NOT NULL,
             UNIQUE(user_id, team_id)
-        );'''
+        );"""
 
         # Weeks per-league
-        week_tbl_sql = '''
+        week_tbl_sql = """
         CREATE TABLE IF NOT EXISTS week(
             id integer PRIMARY KEY,
             season_id text NOT NULL REFERENCES season(id),
             num integer NOT NULL,
             UNIQUE(season_id, num)
-        );'''
+        );"""
 
         # Seed per-player
-        seed_tbl_sql = '''
+        seed_tbl_sql = """
         CREATE TABLE IF NOT EXISTS seed(
             id integer NOT NULL PRIMARY KEY,
             week_id integer NOT NULL REFERENCES week(id),
@@ -118,10 +121,10 @@ class LeagueDatabase:
             note text,
             sub_thread_id INTEGER,
             UNIQUE(week_id, member_id)
-        );'''
+        );"""
 
         # Games per-week
-        game_tbl_sql = '''
+        game_tbl_sql = """
         CREATE TABLE IF NOT EXISTS game(
             id integer NOT NULL PRIMARY KEY,
             white_seed_id integer NOT NULL REFERENCES seed(id),
@@ -132,7 +135,7 @@ class LeagueDatabase:
             url text,
             thread_id INTEGER,
             UNIQUE(white_seed_id, black_seed_id)
-        );'''
+        );"""
 
         # TODO: Force users in a game to also be in the season
 
@@ -150,19 +153,19 @@ class LeagueDatabase:
         self.conn.commit()
 
     def init_season(self):
-        season_sql = '''
+        season_sql = """
         INSERT OR IGNORE INTO season(name) VALUES(?)
-        ;'''
+        ;"""
 
-        week_sql = '''
+        week_sql = """
         INSERT OR IGNORE INTO week(season_id, num)
         VALUES((SELECT id FROM season WHERE name = ?), ?)
-        ;'''
+        ;"""
 
-        signup_sql = '''
+        signup_sql = """
         INSERT OR IGNORE INTO team(season_id, name)
         VALUES((SELECT id FROM season WHERE name = ?), ?)
-        ;'''
+        ;"""
 
         months = [fgg.get_month(i) for i in range(12)]
         for month in months:
@@ -175,20 +178,20 @@ class LeagueDatabase:
         self.conn.commit()
 
     def is_member(self, season_name, discord_id):
-        sql = '''
+        sql = """
         WITH season_ids AS (SELECT s.id FROM season AS s WHERE s.name = ?),
         team_ids AS (SELECT t.id FROM team AS t WHERE t.season_id IN season_ids),
         user_ids AS (SELECT u.id FROM user AS u WHERE u.discord_id = ?)
         SELECT m.id FROM member AS m
         WHERE m.team_id IN team_ids
         AND m.user_id in user_ids
-        ;'''
+        ;"""
         params = (season_name, discord_id)
         df = pd.read_sql_query(sql, self.conn, params=params)
         return len(df) > 0
 
     def get_league_info(self, season_name, discord_id):
-        sql = '''
+        sql = """
         WITH season_ids AS (SELECT s.id FROM season AS s WHERE s.name = ?),
         user_subset AS (SELECT u.* FROM user AS u WHERE u.discord_id = ?)
         SELECT u.discord_name, u.chesscom, mb.is_player, wk.num, sd.request
@@ -197,68 +200,63 @@ class LeagueDatabase:
         LEFT JOIN member AS mb ON sd.sub_member_id = mb.id
         LEFT JOIN user_subset AS u ON mb.user_id = u.id
         WHERE u.id IS NOT NULL
-        ;'''
+        ;"""
         params = (season_name, discord_id)
         df = pd.read_sql_query(sql, self.conn, params=params)
         df = df.pivot(
-            index=['discord_name', 'chesscom', 'is_player'],
-            columns='num',
-            values='request',
+            index=["discord_name", "chesscom", "is_player"],
+            columns="num",
+            values="request",
         )
         df.columns = df.columns.get_level_values(0)
-        yes_no_dict = {0: 'No', 1: 'Yes'}
-        substitute_dict = {0: 'Substitute', 1: 'Player'}
+        yes_no_dict = {0: "No", 1: "Yes"}
+        substitute_dict = {0: "Substitute", 1: "Player"}
         print(df)
         df_dict = {
-            'Rapid Rating': [self.chess_db.get_rating(row[1])['rapid'] for row in df.index],
-            'Discord Name': [row[0] for row in df.index],
-            'Chesscom Name': [row[1] for row in df.index],
-            'Role': [substitute_dict[row[2]] for row in df.index],
-            'Requested Sub Week 1': [
-                yes_no_dict[row._1] for row in df.itertuples()],
-            'Requested Sub Week 2': [
-                yes_no_dict[row._2] for row in df.itertuples()],
-            'Requested Sub Week 3': [
-                yes_no_dict[row._3] for row in df.itertuples()],
-            'Requested Sub Week 4': [
-                yes_no_dict[row._4] for row in df.itertuples()],
+            "Rapid Rating": [
+                self.chess_db.get_rating(row[1])["rapid"] for row in df.index
+            ],
+            "Discord Name": [row[0] for row in df.index],
+            "Chesscom Name": [row[1] for row in df.index],
+            "Role": [substitute_dict[row[2]] for row in df.index],
+            "Requested Sub Week 1": [yes_no_dict[row._1] for row in df.itertuples()],
+            "Requested Sub Week 2": [yes_no_dict[row._2] for row in df.itertuples()],
+            "Requested Sub Week 3": [yes_no_dict[row._3] for row in df.itertuples()],
+            "Requested Sub Week 4": [yes_no_dict[row._4] for row in df.itertuples()],
         }
         df = pd.DataFrame(df_dict)
-        cols = [f'Requested Sub Week {i}' for i in range(1, 5)]
+        cols = [f"Requested Sub Week {i}" for i in range(1, 5)]
         for col in cols:
-            df[col] = [
-                c if r == 'Player' else '-'
-                for c, r in zip(df[col], df['Role'])
-            ]
+            df[col] = [c if r == "Player" else "-" for c, r in zip(df[col], df["Role"])]
         df = df.sort_values(
-            by=['Role', 'Rapid Rating', 'Discord Name', 'Chesscom Name'],
+            by=["Role", "Rapid Rating", "Discord Name", "Chesscom Name"],
             ignore_index=True,
         )
         return df
 
     def update_discord_name(self, discord_id, discord_name):
-        sql = '''
+        sql = """
         UPDATE user SET discord_name = ? WHERE user.discord_id = ?
-        ;'''
+        ;"""
         params = (discord_id, discord_name)
         self.cur.execute(sql, params)
         self.conn.commit()
 
     def set_chesscom(self, discord_id, discord_name, chesscom):
-        sql = '''
+        sql = """
         INSERT INTO user(discord_id, discord_name, chesscom)
         VALUES(?, ?, ?)
         ON CONFLICT(discord_id) DO
         UPDATE SET discord_name = ?, chesscom = ?
-        ;'''
+        ;"""
         params = (discord_id, discord_name, chesscom, discord_name, chesscom)
         self.cur.execute(sql, params)
         self.conn.commit()
 
     def get_user_data(self, discord_id):
-        sql = '''
+        sql = """
         SELECT * FROM user WHERE discord_id = ?
-        ;'''
+        ;"""
         params = (discord_id,)
         df = pd.read_sql_query(sql, self.conn, params=params)
         return df
@@ -266,7 +264,7 @@ class LeagueDatabase:
     def request_sub(self, season_name, week_num, discord_id):
         week_num = int(week_num)
         assert week_num in [1, 2, 3, 4]
-        sql = '''
+        sql = """
         WITH season_ids AS (SELECT s.id FROM season AS s WHERE s.name = ?),
         team_ids AS (SELECT t.id FROM team AS t WHERE t.season_id IN season_ids),
         user_ids AS (SELECT u.id FROM user AS u WHERE u.discord_id = ?),
@@ -282,13 +280,13 @@ class LeagueDatabase:
         UPDATE seed SET request = 1
         WHERE seed.sub_member_id IN member_ids
         AND seed.week_id IN week_ids
-        ;'''
+        ;"""
         params = (season_name, discord_id, week_num)
         self.cur.execute(sql, params)
         self.conn.commit()
 
     def set_game(self, season_name, week_num, w_discord_id, b_discord_id):
-        sql = '''
+        sql = """
         WITH season_ids AS (SELECT s.id FROM season AS s WHERE s.name = ?),
         team_ids AS (SELECT t.id FROM team AS t WHERE t.season_id IN season_ids),
         white_user_ids AS (SELECT u.id FROM user AS u WHERE u.discord_id = ?),
@@ -312,17 +310,23 @@ class LeagueDatabase:
 
         INSERT INTO game(white_seed_id, black_seed_id)
         VALUES(
-            (SELECT s.id FROM seed_subset AS s WHERE s.sub_member_id IN white_member_ids),
-            (SELECT s.id FROM seed_subset AS s WHERE s.sub_member_id IN black_member_ids),
+            (
+                SELECT s.id FROM seed_subset AS s
+                WHERE s.sub_member_id IN white_member_ids
+            ),
+            (
+                SELECT s.id FROM seed_subset AS s
+                WHERE s.sub_member_id IN black_member_ids
+            ),
         )
-        ;'''
+        ;"""
 
         params = (season_name, w_discord_id, b_discord_id, week_num)
         self.cur.execute(sql, params)
         self.conn.commit()
 
     def get_all_games(self, season_name, discord_id):
-        sql = '''
+        sql = """
         WITH season_ids AS (SELECT s.id FROM season AS s WHERE s.name = ?),
         team_ids AS (SELECT t.id FROM team AS t WHERE t.season_id IN season_ids),
         user_ids AS (SELECT u.id FROM user AS u WHERE u.discord_id = ?),
@@ -338,13 +342,13 @@ class LeagueDatabase:
         SELECT g.* FROM game AS g
         WHERE g.black_seed_id IN seed_ids
         OR g.white_seed_id IN seed_ids
-        ;'''
+        ;"""
         params = (season_name, discord_id)
         df = pd.read_sql_query(sql, self.conn, params=params)
         return df
 
     def league_player_to_sub(self, season_name, discord_id):
-        sql = '''
+        sql = """
         WITH season_ids AS (SELECT s.id FROM season AS s WHERE s.name = ?),
         team_ids AS (SELECT t.id FROM team AS t WHERE t.season_id IN season_ids),
         user_ids AS (SELECT u.id FROM user AS u WHERE u.discord_id = ?)
@@ -352,13 +356,13 @@ class LeagueDatabase:
         UPDATE member SET is_player = 0
         WHERE member.user_id IN user_ids
         AND member.team_id IN team_ids
-        ;'''
+        ;"""
         params = (season_name, discord_id)
         self.cur.execute(sql, params)
         self.conn.commit()
 
     def league_leave(self, season_name, discord_id):
-        sql = '''
+        sql = """
         WITH season_ids AS (SELECT s.id FROM season AS s WHERE s.name = ?),
         team_ids AS (SELECT t.id FROM team AS t WHERE t.season_id IN season_ids),
         user_ids AS (SELECT u.id FROM user AS u WHERE u.discord_id = ?)
@@ -366,7 +370,7 @@ class LeagueDatabase:
         DELETE FROM member AS m
         WHERE m.user_id IN user_ids
         AND m.team_id in team_ids
-        ;'''
+        ;"""
 
         # If user has a game, just make them a sub
         params = (season_name, discord_id)
@@ -378,10 +382,11 @@ class LeagueDatabase:
             self.league_player_to_sub(season_name, discord_id)
 
     def league_join(
-        self, season_name, discord_id, is_player, team=SIGNUP_TEAM, sub_week=None):
+        self, season_name, discord_id, is_player, team=SIGNUP_TEAM, sub_week=None
+    ):
 
         # Default team is signup
-        sql = '''
+        sql = """
         WITH season_ids AS (SELECT s.id FROM season AS s WHERE s.name = ?),
         team_ids AS (
             SELECT t.id FROM team AS t
@@ -393,15 +398,15 @@ class LeagueDatabase:
             (SELECT id FROM user WHERE discord_id = ?),
             (SELECT * FROM team_ids),
             ?)
-        ;'''
+        ;"""
         params = (season_name, team, discord_id, is_player)
         try:
             self.cur.execute(sql, params)
-        except sqlite3.IntegrityError as e:
+        except sqlite3.IntegrityError:
             return
 
         # Create seeds for the player
-        sql = '''
+        sql = """
         WITH season_ids AS (SELECT s.id FROM season AS s WHERE s.name = ?),
         team_ids AS (
             SELECT t.id FROM team AS t
@@ -424,7 +429,7 @@ class LeagueDatabase:
         )
         ON CONFLICT(week_id, member_id) DO UPDATE SET request = 0
         WHERE member_id IN member_ids AND week_id IN week_ids
-        ;'''
+        ;"""
         for i in range(1, 5):
             params = (season_name, team, discord_id, i)
             self.cur.execute(sql, params)
@@ -435,18 +440,18 @@ class LeagueDatabase:
 
     def get_team_names(self, season_name):
         # Grab team names
-        sql = '''
+        sql = """
         WITH season_ids AS (SELECT s.id FROM season AS s WHERE s.name = ?)
         SELECT t.name FROM team AS t WHERE t.season_id IN season_ids
-        ;'''
+        ;"""
         params = (season_name,)
         df = pd.read_sql_query(sql, self.conn, params=params)
-        team_names = [n for n in df['name'] if n != SIGNUP_TEAM]
+        team_names = [n for n in df["name"] if n != SIGNUP_TEAM]
         return team_names
 
     def get_team_members(self, season_name, team, get_subs=False):
         # Then grab users to split into teams
-        sql = '''
+        sql = """
         WITH season_ids AS (SELECT s.id FROM season AS s WHERE s.name = ?),
         team_ids AS (
             SELECT t.id FROM team AS t
@@ -465,14 +470,14 @@ class LeagueDatabase:
             u.discord_name AS discord_name,
             u.chesscom AS chesscom
         FROM user AS u WHERE u.id IN user_ids
-        ;'''
+        ;"""
         params = (season_name, team, int(not get_subs))
         df = pd.read_sql_query(sql, self.conn, params=params)
         return df
 
     def reset_teams(self, season_name, assign_sub=False):
         # Then grab users to split into teams
-        sql = '''
+        sql = """
         WITH season_ids AS (SELECT s.id FROM season AS s WHERE s.name = ?),
         team_ids AS (
             SELECT t.id FROM team AS t
@@ -485,12 +490,12 @@ class LeagueDatabase:
         )
 
         SELECT u.id, u.chesscom FROM user AS u WHERE u.id IN user_ids
-        ;'''
+        ;"""
         params = (season_name, int(not assign_sub))
         df = pd.read_sql_query(sql, self.conn, params=params)
 
         # Update sql
-        sql = '''
+        sql = """
         WITH season_ids AS (SELECT s.id FROM season AS s WHERE s.name = ?),
         team_ids AS (SELECT t.id FROM team AS t WHERE t.season_id IN season_ids)
         UPDATE member
@@ -500,7 +505,7 @@ class LeagueDatabase:
             AND t.season_id IN season_ids
         )
         WHERE member.team_id IN team_ids AND member.user_id = ?
-        ;'''
+        ;"""
         dfs = {SIGNUP_TEAM: df}
         for team_name, df in dfs.items():
             for row in df.itertuples():
@@ -513,8 +518,8 @@ class LeagueDatabase:
         df = self.get_team_members(season_name, SIGNUP_TEAM, assign_sub)
 
         # Assign users to teams
-        ratings = [self.chess_db.get_rating(c)['rapid'] for c in df['chesscom']]
-        df['rating'] = ratings
+        ratings = [self.chess_db.get_rating(c)["rapid"] for c in df["chesscom"]]
+        df["rating"] = ratings
 
         score = np.inf
         dfs = []
@@ -523,10 +528,10 @@ class LeagueDatabase:
             if new_score < score:
                 score = new_score
                 dfs = new_dfs
-                print('new_score', score)
+                print("new_score", score)
 
         # Update sql
-        sql = '''
+        sql = """
         WITH season_ids AS (SELECT s.id FROM season AS s WHERE s.name = ?),
         team_ids AS (SELECT t.id FROM team AS t WHERE t.season_id IN season_ids)
         UPDATE member
@@ -536,7 +541,7 @@ class LeagueDatabase:
             AND t.season_id in season_ids
         )
         WHERE member.team_id IN team_ids AND member.user_id = ?
-        ;'''
+        ;"""
         for team_name, df in dfs.items():
             for row in df.itertuples():
                 params = (season_name, team_name, row.user_id)
@@ -546,29 +551,28 @@ class LeagueDatabase:
     def seed_games(self, season_name, week_num):
         # TODO: don't let a player sit out more than one game a season
 
-        rant_df = self.get_team_members(season_name, 'Team Carlsen')
-        rant_df['rating'] = [
-            self.chess_db.get_rating(row.chesscom)['rapid']
+        rant_df = self.get_team_members(season_name, "Team Carlsen")
+        rant_df["rating"] = [
+            self.chess_db.get_rating(row.chesscom)["rapid"]
             for row in rant_df.itertuples()
         ]
 
-        nort_df = self.get_team_members(season_name, 'Team Nepomniachtchi')
-        nort_df['rating'] = [
-            self.chess_db.get_rating(row.chesscom)['rapid']
+        nort_df = self.get_team_members(season_name, "Team Nepomniachtchi")
+        nort_df["rating"] = [
+            self.chess_db.get_rating(row.chesscom)["rapid"]
             for row in nort_df.itertuples()
         ]
 
-        rant_df = rant_df.sort_values(by=['rating'], ignore_index=True)
-        nort_df = nort_df.sort_values(by=['rating'], ignore_index=True)
-        rant_df_ids = [int(i) for i in rant_df['discord_id']]
-        nort_df_ids = [int(i) for i in nort_df['discord_id']]
+        rant_df = rant_df.sort_values(by=["rating"], ignore_index=True)
+        nort_df = nort_df.sort_values(by=["rating"], ignore_index=True)
+        rant_df_ids = [int(i) for i in rant_df["discord_id"]]
+        nort_df_ids = [int(i) for i in nort_df["discord_id"]]
 
-        teams = ['Team Carlsen', 'Team Nepomniachtchi']
         games_df = self.get_season_games(season_name)
         game_history = []
         for row in games_df.itertuples():
             print(row)
-            if row.white_team_name == 'Team Carlsen':
+            if row.white_team_name == "Team Carlsen":
                 rant_id = row.white_discord_id
                 nort_id = row.black_discord_id
             else:
@@ -595,9 +599,9 @@ class LeagueDatabase:
 
             scores = []
             for rr, nr in zip(rdf.itertuples(), ndf.itertuples()):
-                scores.append((rr.rating - nr.rating)**2)
+                scores.append((rr.rating - nr.rating) ** 2)
 
-            score = 0.01*int(np.mean(scores)) + max(scores)
+            score = 0.01 * int(np.mean(scores)) + max(scores)
             if verbose:
                 print(sorted(scores))
             return score
@@ -608,6 +612,7 @@ class LeagueDatabase:
             seq[i1], seq[i2] = seq[i2], seq[i1]
 
         def gen_team_dfs():
+            print(rant_df)
             rant_inds = list(range(len(rant_df)))
             nort_inds = list(range(len(nort_df)))
             score = score_inds(rant_inds, nort_inds)
@@ -618,8 +623,8 @@ class LeagueDatabase:
             iter_count = 1
             while time.time() - start < 4:
                 counter += 1
-                old_rant_inds = [r for r in rant_inds]
-                old_nort_inds = [r for r in nort_inds]
+                old_rant_inds = list(rant_inds)
+                old_nort_inds = list(nort_inds)
                 iter_count += 0.01
                 for _ in range(int(iter_count)):
                     if random.random() < 0.5:
@@ -637,7 +642,7 @@ class LeagueDatabase:
                         rdf = rant_df.iloc[old_rant_inds]
                         ndf = nort_df.iloc[old_nort_inds]
                         to_print = [
-                            ((rr.rating-nr.rating)**2, f'{rr.rating}-{nr.rating}')
+                            ((rr.rating - nr.rating) ** 2, f"{rr.rating}-{nr.rating}")
                             for rr, nr in zip(rdf.itertuples(), ndf.itertuples())
                         ]
                         to_print = sorted(to_print)
@@ -650,7 +655,7 @@ class LeagueDatabase:
             print()
             return score, rdf, ndf
 
-        dfs = [gen_team_dfs() for i in range(16)]
+        dfs = [gen_team_dfs() for _ in range(16)]
         dfs = sorted(dfs, key=lambda x: x[0])
         print([d[0] for d in dfs])
         score, rdf, ndf = dfs[0]
@@ -662,7 +667,7 @@ class LeagueDatabase:
         print(score)
         print(score)
 
-        sql = '''
+        sql = """
         WITH season_ids AS (SELECT s.id FROM season AS s WHERE s.name = ?),
         team_ids AS (SELECT t.id FROM team AS t WHERE t.season_id IN season_ids),
         white_member_ids AS (
@@ -691,7 +696,7 @@ class LeagueDatabase:
                 AND s.week_id in week_ids
             )
         )
-        ;'''
+        ;"""
 
         for r, n in zip(rdf.itertuples(), ndf.itertuples()):
             both_ids = [r.user_id, n.user_id]
@@ -703,7 +708,7 @@ class LeagueDatabase:
         self.conn.commit()
 
     def get_games_by_week(self, season_name, week_num):
-        sql = '''
+        sql = """
         WITH season_ids AS (SELECT s.id FROM season AS s WHERE s.name = ?),
         team_ids AS (SELECT t.id FROM team AS t WHERE t.season_id IN season_ids),
         user_ids AS (SELECT u.id FROM user AS u),
@@ -738,37 +743,35 @@ class LeagueDatabase:
         LEFT JOIN member AS bm ON bs.sub_member_id = bm.id
         LEFT JOIN user AS bu ON bm.user_id = bu.id
         WHERE g.black_seed_id IN seed_ids OR g.white_seed_id IN seed_ids
-        ;'''
+        ;"""
         params = (season_name, week_num)
         df = pd.read_sql_query(sql, self.conn, params=params)
         df.columns = [
-            'game_id',
-            'schedule',
-            'result',
-            'url',
-            'white_discord_id',
-            'white_discord_name',
-            'white_chesscom',
-            'black_discord_id',
-            'black_discord_name',
-            'black_chesscom',
+            "game_id",
+            "schedule",
+            "result",
+            "url",
+            "white_discord_id",
+            "white_discord_name",
+            "white_chesscom",
+            "black_discord_id",
+            "black_discord_name",
+            "black_chesscom",
         ]
-        df['white_rapid_rating'] = [
-            self.chess_db.get_rating(c)['rapid']
-            for c in df['white_chesscom']
+        df["white_rapid_rating"] = [
+            self.chess_db.get_rating(c)["rapid"] for c in df["white_chesscom"]
         ]
-        df['black_rapid_rating'] = [
-            self.chess_db.get_rating(c)['rapid']
-            for c in df['black_chesscom']
+        df["black_rapid_rating"] = [
+            self.chess_db.get_rating(c)["rapid"] for c in df["black_chesscom"]
         ]
         df = df.sort_values(
-            by=['white_rapid_rating', 'black_rapid_rating'],
+            by=["white_rapid_rating", "black_rapid_rating"],
             ignore_index=True,
         )
         return df
 
     def get_sub_announce(self, season_name, week_num, discord_id):
-        sql = '''
+        sql = """
         WITH season_ids AS (SELECT s.id FROM season AS s WHERE s.name = ?),
         team_ids AS (SELECT t.id FROM team AS t WHERE t.season_id IN season_ids),
         user_ids AS (SELECT u.id FROM user AS u WHERE u.discord_id = ?),
@@ -790,21 +793,21 @@ class LeagueDatabase:
         LEFT JOIN user AS u ON m.user_id = u.id
         LEFT JOIN team AS t ON m.team_id = t.id
         WHERE s.week_id IN week_ids AND s.sub_member_id IN member_ids
-        ;'''
+        ;"""
         params = (season_name, discord_id, week_num)
         df = pd.read_sql_query(sql, self.conn, params=params)
         return df
 
     def set_sub_thread_id(self, seed_id, sub_thread_id):
-        sql = '''
+        sql = """
         UPDATE seed SET sub_thread_id = ? WHERE seed.id = ?
-        ;'''
+        ;"""
         params = (sub_thread_id, seed_id)
         self.cur.execute(sql, params)
         self.conn.commit()
 
     def get_gameid_from_seedid(self, seed_id):
-        sql = '''
+        sql = """
         SELECT g.id, wu.discord_id, bu.discord_id FROM game AS g
         LEFT JOIN seed AS ws ON g.white_seed_id = ws.id
         LEFT JOIN member AS wm ON ws.sub_member_id = wm.id
@@ -813,18 +816,18 @@ class LeagueDatabase:
         LEFT JOIN member AS bm ON bs.sub_member_id = bm.id
         LEFT JOIN user AS bu ON bm.user_id = bu.id
         WHERE g.white_seed_id = ? OR g.black_seed_id = ?
-        ;'''
+        ;"""
         params = (seed_id, seed_id)
         df = pd.read_sql_query(sql, self.conn, params=params)
         df.columns = [
-            'game_id',
-            'white_discord_id',
-            'black_discord_id',
+            "game_id",
+            "white_discord_id",
+            "black_discord_id",
         ]
         return df
 
     def get_claim_sub_from(self, seed_id):
-        sql = '''
+        sql = """
         SELECT
             t.name AS team_name,
             u.chesscom AS chesscom,
@@ -838,13 +841,13 @@ class LeagueDatabase:
         LEFT JOIN user AS u ON m.user_id = u.id
         WHERE s.id = ?
         AND request = 1
-        ;'''
+        ;"""
         params = (seed_id,)
         df = pd.read_sql_query(sql, self.conn, params=params)
         return df
 
     def get_claim_sub_to(self, season_name, discord_id):
-        sql = '''
+        sql = """
         WITH season_ids AS (SELECT s.id FROM season AS s WHERE s.name = ?),
         team_ids AS (SELECT t.id FROM team AS t WHERE t.season_id IN season_ids),
         user_ids AS (SELECT u.id FROM user AS u WHERE u.discord_id = ?),
@@ -856,18 +859,18 @@ class LeagueDatabase:
         LEFT JOIN user AS u ON m.user_id = u.id
         LEFT JOIN team AS t on m.team_id = t.id
         WHERE m.user_id IN user_ids AND m.team_id IN team_ids
-        ;'''
+        ;"""
         params = (season_name, discord_id)
         df = pd.read_sql_query(sql, self.conn, params=params)
         df.columns = [
-            'member_id',
-            'team_name',
-            'chesscom',
+            "member_id",
+            "team_name",
+            "chesscom",
         ]
         return df
 
     def update_sub(self, season_name, seed_id, discord_id):
-        sql = '''
+        sql = """
         WITH season_ids AS (SELECT s.id FROM season AS s WHERE s.name = ?),
         team_ids AS (SELECT t.id FROM team AS t WHERE t.season_id IN season_ids),
         user_ids AS (SELECT u.id FROM user AS u WHERE u.discord_id = ?)
@@ -878,35 +881,35 @@ class LeagueDatabase:
         ),
         request = 0
         WHERE seed.id = ?
-        ;'''
+        ;"""
         params = (season_name, discord_id, seed_id)
         self.cur.execute(sql, params)
         self.conn.commit()
 
-        sql = '''
+        sql = """
         WITH seed_ids AS (SELECT s.id FROM seed AS s WHERE s.id = ?)
         UPDATE game SET
         schedule = ?
         WHERE game.black_seed_id IN seed_ids OR game.white_seed_id IN seed_ids
-        ;'''
+        ;"""
         params = (seed_id, None)
         self.cur.execute(sql, params)
         self.conn.commit()
 
     def set_team_names(self, season_name, team_names):
-        sql = '''
+        sql = """
         INSERT OR IGNORE INTO team(season_id, name)
         VALUES(
             (SELECT s.id FROM season AS s WHERE s.name = ?),
             ?
-        );'''
+        );"""
         for team_name in team_names:
             params = (season_name, team_name)
             self.cur.execute(sql, params)
         self.conn.commit()
 
     def update_signup_info(self, season_name):
-        sql = '''
+        sql = """
         WITH season_ids AS (SELECT s.id FROM season AS s WHERE s.name = ?),
         week_ids AS (SELECT w.id FROM week AS w WHERE w.season_id IN season_ids)
         SELECT
@@ -920,71 +923,66 @@ class LeagueDatabase:
         LEFT JOIN member AS mb ON sd.sub_member_id = mb.id
         LEFT JOIN user AS u ON mb.user_id = u.id
         WHERE sd.week_id IN week_ids
-        ;'''
+        ;"""
         params = (season_name,)
         df = pd.read_sql_query(sql, self.conn, params=params)
         df = df.pivot(
-            index=['discord_name', 'chesscom', 'is_player'],
-            columns='num',
-            values='request',
+            index=["discord_name", "chesscom", "is_player"],
+            columns="num",
+            values="request",
         )
         df.columns = df.columns.get_level_values(0)
-        yes_no_dict = {0: 'No', 1: 'Yes'}
-        substitute_dict = {0: 'Substitute', 1: 'Player'}
+        yes_no_dict = {0: "No", 1: "Yes"}
+        substitute_dict = {0: "Substitute", 1: "Player"}
         df_dict = {
-            'Rapid Rating': [self.chess_db.get_rating(row[1])['rapid'] for row in df.index],
-            'Discord Name': [row[0] for row in df.index],
-            'Chesscom Name': [row[1] for row in df.index],
-            'Role': [substitute_dict[row[2]] for row in df.index],
-            'Requested Sub Week 1': [
-                yes_no_dict[row._1] for row in df.itertuples()],
-            'Requested Sub Week 2': [
-                yes_no_dict[row._2] for row in df.itertuples()],
-            'Requested Sub Week 3': [
-                yes_no_dict[row._3] for row in df.itertuples()],
-            'Requested Sub Week 4': [
-                yes_no_dict[row._4] for row in df.itertuples()],
+            "Rapid Rating": [
+                self.chess_db.get_rating(row[1])["rapid"] for row in df.index
+            ],
+            "Discord Name": [row[0] for row in df.index],
+            "Chesscom Name": [row[1] for row in df.index],
+            "Role": [substitute_dict[row[2]] for row in df.index],
+            "Requested Sub Week 1": [yes_no_dict[row._1] for row in df.itertuples()],
+            "Requested Sub Week 2": [yes_no_dict[row._2] for row in df.itertuples()],
+            "Requested Sub Week 3": [yes_no_dict[row._3] for row in df.itertuples()],
+            "Requested Sub Week 4": [yes_no_dict[row._4] for row in df.itertuples()],
         }
         df = pd.DataFrame(df_dict)
-        cols = [f'Requested Sub Week {i}' for i in range(1, 5)]
+        cols = [f"Requested Sub Week {i}" for i in range(1, 5)]
         for col in cols:
-            df[col] = [
-                c if r == 'Player' else '-'
-                for c, r in zip(df[col], df['Role'])
-            ]
+            df[col] = [c if r == "Player" else "-" for c, r in zip(df[col], df["Role"])]
         df = df.sort_values(
-            by=['Role', 'Rapid Rating', 'Discord Name', 'Chesscom Name'],
+            by=["Role", "Rapid Rating", "Discord Name", "Chesscom Name"],
             ignore_index=True,
         )
 
         return df
 
     def set_result(self, game_id, result, url=None):
-        sql = '''
+        sql = """
         UPDATE game SET result = ?, url = ? WHERE game.id = ?
-        ;'''
+        ;"""
         params = (result, url, game_id)
         self.cur.execute(sql, params)
         self.conn.commit()
 
     def set_thread_id(self, game_id, thread_id):
-        sql = '''
+        sql = """
         UPDATE game SET thread_id = ? WHERE game.id = ?
-        ;'''
+        ;"""
         params = (game_id, thread_id)
         self.cur.execute(sql, params)
         self.conn.commit()
 
     def schedule(self, game_id, event_id, game_datetime):
-        sql = '''
+        sql = """
         UPDATE game SET schedule = ?, event_id = ? WHERE game.id = ?
-        ;'''
+        ;"""
         params = (str(game_datetime), str(event_id), game_id)
         self.cur.execute(sql, params)
         self.conn.commit()
 
     def get_game_by_id(self, game_id):
-        sql = '''
+        sql = """
         SELECT
             g.id AS game_id,
             g.schedule AS schedule,
@@ -1005,21 +1003,19 @@ class LeagueDatabase:
         LEFT JOIN member AS bm ON bs.sub_member_id = bm.id
         LEFT JOIN user AS bu ON bm.user_id = bu.id
         WHERE g.id = ?
-        ;'''
+        ;"""
         params = (game_id,)
         df = pd.read_sql_query(sql, self.conn, params=params)
-        df['white_rapid_rating'] = [
-            self.chess_db.get_rating(c)['rapid']
-            for c in df['white_chesscom']
+        df["white_rapid_rating"] = [
+            self.chess_db.get_rating(c)["rapid"] for c in df["white_chesscom"]
         ]
-        df['black_rapid_rating'] = [
-            self.chess_db.get_rating(c)['rapid']
-            for c in df['black_chesscom']
+        df["black_rapid_rating"] = [
+            self.chess_db.get_rating(c)["rapid"] for c in df["black_chesscom"]
         ]
         return df
 
     def get_member_info(self, season_name):
-        sql = '''
+        sql = """
         WITH season_ids AS (SELECT s.id FROM season AS s WHERE s.name = ?),
         team_ids AS (
             SELECT t.id AS id FROM team AS t
@@ -1037,17 +1033,16 @@ class LeagueDatabase:
         LEFT JOIN team AS t ON m.team_id = t.id
         LEFT JOIN user AS u ON m.user_id = u.id
         WHERE m.team_id IN team_ids
-        ;'''
+        ;"""
         params = (season_name,)
         df = pd.read_sql_query(sql, self.conn, params=params)
-        df['rapid_rating'] = [
-            self.chess_db.get_rating(c)['rapid']
-            for c in df['chesscom']
+        df["rapid_rating"] = [
+            self.chess_db.get_rating(c)["rapid"] for c in df["chesscom"]
         ]
         return df
 
     def get_request_info(self, season_name):
-        sql = '''
+        sql = """
         WITH season_ids AS (SELECT s.id FROM season AS s WHERE s.name = ?),
         team_ids AS (
             SELECT t.id AS id FROM team AS t
@@ -1066,13 +1061,13 @@ class LeagueDatabase:
         LEFT JOIN member AS m ON s.member_id = m.id
         LEFT JOIN week AS w ON s.week_id = w.id
         WHERE s.member_id IN member_ids
-        ;'''
+        ;"""
         params = (season_name,)
         df = pd.read_sql_query(sql, self.conn, params=params)
         return df
 
     def get_season_games(self, season_name):
-        sql = '''
+        sql = """
         WITH season_ids AS (SELECT s.id FROM season AS s WHERE s.name = ?),
         week_ids AS (SELECT w.id FROM week AS w WHERE w.season_id IN season_ids),
         seed_ids AS (SELECT s.id FROM seed AS s WHERE s.week_id IN week_ids)
@@ -1110,23 +1105,23 @@ class LeagueDatabase:
         LEFT JOIN team AS bt ON bm.team_id = bt.id
 
         WHERE (g.black_seed_id IN seed_ids OR g.white_seed_id IN seed_ids)
-        ;'''
+        ;"""
         params = (season_name,)
         df = pd.read_sql_query(sql, self.conn, params=params)
         return df
 
+
 def gen_split_score(df, splits):
     df_splits = [df.iloc[s] for s in splits]
-    mean_score = np.mean([
-        np.linalg.norm(d['rating'].mean() - df['rating'].mean())
-        for d in df_splits
-    ])
-    std_score = np.mean([
-        np.linalg.norm(d['rating'].std() - df['rating'].std())
-        for d in df_splits
-    ])
+    mean_score = np.mean(
+        [np.linalg.norm(d["rating"].mean() - df["rating"].mean()) for d in df_splits]
+    )
+    std_score = np.mean(
+        [np.linalg.norm(d["rating"].std() - df["rating"].std()) for d in df_splits]
+    )
     score = mean_score + std_score
     return score
+
 
 def even_split(df, team_names, iter_time=10, verbose=False):
     num_teams = len(team_names)
@@ -1143,7 +1138,7 @@ def even_split(df, team_names, iter_time=10, verbose=False):
     while time.time() - start < iter_time:
 
         # Shuffle splits, preserve old splits if things go wrong
-        old_splits = [[i for i in j] for j in splits]
+        old_splits = [list(j) for j in splits]
         old_score = score
         for _ in range(101):
             a, b = [int(i) for i in random.sample(range(num_teams), 2)]
@@ -1158,11 +1153,16 @@ def even_split(df, team_names, iter_time=10, verbose=False):
                 score = new_score
                 for s in splits:
                     if verbose:
-                        print(list(df.iloc[s].sort_values(
-                            by='rating', ignore_index=True)['rating']))
+                        print(
+                            list(
+                                df.iloc[s].sort_values(by="rating", ignore_index=True)[
+                                    "rating"
+                                ]
+                            )
+                        )
                 if verbose:
                     print()
-                new_splits = [[i for i in j] for j in splits]
+                new_splits = [list(j) for j in splits]
         if score < old_score:
             splits = new_splits
             old_score = score
@@ -1177,43 +1177,44 @@ def even_split(df, team_names, iter_time=10, verbose=False):
     dfs = {t: df.iloc[s] for t, s in zip(team_names, splits)}
     return dfs, old_score
 
+
 def read_history():
-    history = 'data/discord_history.parquet'
+    history = "data/discord_history.parquet"
     df = pd.read_parquet(history)
-    df = df[[row.text.startswith('!') for row in df.itertuples()]]
-    df = df.sort_values(by='date', ignore_index=True)
-    df['date'] = [d.tz_convert(None) for d in df['date']]
-    df = df[[not t.startswith('!help') for t in df['text']]]
-    df = df[[not t.startswith('!league_info') for t in df['text']]]
-    df = df[df['name'] != 'pawngrubber#1621']
-    df['text'] = [' '.join([t.split(' ')[0].lower()] + t.split(' ')[1:]) for t in df['text']]
+    df = df[[row.text.startswith("!") for row in df.itertuples()]]
+    df = df.sort_values(by="date", ignore_index=True)
+    df["date"] = [d.tz_convert(None) for d in df["date"]]
+    df = df[[not t.startswith("!help") for t in df["text"]]]
+    df = df[[not t.startswith("!league_info") for t in df["text"]]]
+    df = df[df["name"] != "pawngrubber#1621"]
+    df["text"] = [
+        " ".join([t.split(" ")[0].lower()] + t.split(" ")[1:]) for t in df["text"]
+    ]
     df = df.reset_index(drop=True)
 
     skip_prefixes = [
-        '!rapid',
-        '!sunglasses',
-        '!calendar',
-        '!hello',
-        '!!',
-        '!list',
-        '!league_info',
-
-        '!set_chesscom',
-        '!link_chesscom',
-        '!mod_set_chesscom', # revisit?
-        '!join_rapid_league',
-        '!league_join',
-        '!join',
-        '!lhelp',
-        '!leave',
-        '!league_leave',
-        '!league_request_substitute',
+        "!rapid",
+        "!sunglasses",
+        "!calendar",
+        "!hello",
+        "!!",
+        "!list",
+        "!league_info",
+        "!set_chesscom",
+        "!link_chesscom",
+        "!mod_set_chesscom",  # revisit?
+        "!join_rapid_league",
+        "!league_join",
+        "!join",
+        "!lhelp",
+        "!leave",
+        "!league_leave",
+        "!league_request_substitute",
     ]
-    unique = list(np.unique(df['text']))
+    unique = list(np.unique(df["text"]))
     for s in skip_prefixes:
         unique = [u for u in unique if not u.startswith(s)]
 
-    e_text = ''
     LDB = LeagueDatabase()
 
     def title_to_game_id(title):
@@ -1222,12 +1223,13 @@ def read_history():
 
         id_dict = {
             (
-                row.white_discord_name.replace('#', ''),
-                row.black_discord_name.replace('#', ''),
-            ): row.game_id for row in df.itertuples()
+                row.white_discord_name.replace("#", ""),
+                row.black_discord_name.replace("#", ""),
+            ): row.game_id
+            for row in df.itertuples()
         }
 
-        split = title.split(' ')
+        split = title.split(" ")
         white_name = split[2]
         black_name = split[4]
         key = (white_name, black_name)
@@ -1235,13 +1237,15 @@ def read_history():
         return game_id
 
     import funcs_discord as fdd
+
     class User:
         def __init__(self, mention, id_):
             self.id = id_
             self.mention = mention
+
     for row in tqdm(df.itertuples(), total=len(df)):
-        split = row.text.split(' ')
-        if split[0].startswith('!league_set_result') and len(split) > 1:
+        split = row.text.split(" ")
+        if split[0].startswith("!league_set_result") and len(split) > 1:
             try:
                 game_id = title_to_game_id(row.channel)
             except KeyError:
@@ -1250,20 +1254,23 @@ def read_history():
                 continue
             try:
                 elem = {
-                    'mention': 'me',
-                    'user': User('you', row.discord_id),
-                    'game_id': game_id,
-                    'url': split[1]
+                    "mention": "me",
+                    "user": User("you", row.discord_id),
+                    "game_id": game_id,
+                    "url": split[1],
                 }
-            except IndexError as e:
+            except IndexError:
                 continue
             pprint(elem)
             msg = fdd.league_set_result(**elem)
             print(msg)
             print()
-            #LDB.set_result(**elem)
-        '''
-        if row.text.startswith('!set_chesscom') or row.text.startswith('!link_chesscom'):
+            # LDB.set_result(**elem)
+        """
+        if (
+            row.text.startswith('!set_chesscom')
+            or row.text.startswith('!link_chesscom')
+        ):
             if len(split) > 1:
                 if exists_chesscom(split[1]):
                     LDB.set_chesscom(row.id, row.name, split[1])
@@ -1288,7 +1295,7 @@ def read_history():
         if split[0].startswith('!league_request_substitute'):
             if len(split) > 1 and split[1] in list('1234'):
                 LDB.request_sub(fgg.get_month(0), int(split[1]), row.id)
-        '''
+        """
 
     pprint(unique)
     print()
@@ -1299,28 +1306,36 @@ def read_history():
         print()
     raise Exception
 
+
 def backup_databases():
     pass
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     LDB = LeagueDatabase()
     season_name = fgg.get_month()
-    week_num = 1
-    team_names = ['Team Nepomniachtchi', 'Team Carlsen']
+    week_num = 4
+    team_names = ["Team Nepomniachtchi", "Team Carlsen"]
 
-    print(LDB.get_season_games(season_name))
-    raise Exception
+    # print(LDB.get_season_games(season_name))
+    # raise Exception
 
-    if True:
+    if False:
         print(LDB.get_games_by_week(season_name, week_num))
-        sql = '''
+        sql = """
         WITH season_ids AS (SELECT s.id FROM season AS s WHERE s.name = ?),
-        week_ids AS (SELECT w.id FROM week AS w WHERE w.num = ? AND w.season_id in season_ids),
+        week_ids AS (
+            SELECT w.id FROM week AS w
+            WHERE w.num = ? AND w.season_id in season_ids
+        ),
         seed_ids AS (SELECT s.id FROM seed AS s WHERE s.week_id IN week_ids)
         DELETE FROM game
         WHERE game.black_seed_id IN seed_ids OR game.white_seed_id IN seed_ids
-        ;'''
-        params = (season_name, week_num,)
+        ;"""
+        params = (
+            season_name,
+            week_num,
+        )
         LDB.cur.execute(sql, params)
         LDB.conn.commit()
         print(LDB.get_games_by_week(season_name, week_num))
@@ -1339,7 +1354,7 @@ if __name__ == '__main__':
         season_name = fgg.get_month()
 
         LDB.set_team_names(fgg.get_month(-1), [CORRUPTED_TEAM])
-        sql = '''
+        sql = """
         WITH season_ids AS (SELECT s.id FROM season AS s WHERE s.name = ?),
         team_ids AS (
             SELECT t.id FROM team AS t
@@ -1353,30 +1368,30 @@ if __name__ == '__main__':
             AND t.season_id in old_season_ids
         )
         WHERE member.team_id in team_ids
-        ;'''
+        ;"""
         for team_name in team_names:
             params = (season_name, team_name, fgg.get_month(-1), CORRUPTED_TEAM)
             LDB.cur.execute(sql, params)
         LDB.conn.commit()
 
     LDB.assign_teams(season_name, assign_sub=True)
-    '''
+    """
     LDB.reset_teams(season_name, assign_sub=False)
     LDB.set_team_names(season_name, ['Team Nepomniachtchi', 'Team Carlsen'])
     LDB.assign_teams(season_name)
-    '''
-    #LDB.league_leave(fgg.get_month(0), 80632841108463616)
-    '''
+    """
+    # LDB.league_leave(fgg.get_month(0), 80632841108463616)
+    """
     df_dict = LDB.get_all_tables()
     for name, df in df_dict.items():
         print(df)
         print(name)
         print()
-    '''
+    """
     raise Exception
 
     # Update sql
-    sql = '''
+    sql = """
     WITH season_ids AS (SELECT s.id FROM season AS s WHERE s.name = ?),
     team_ids AS (SELECT t.id FROM team AS t WHERE t.season_id IN season_ids),
     user_ids AS (SELECT u.id FROM user AS u WHERE u.discord_name = ?)
@@ -1384,16 +1399,16 @@ if __name__ == '__main__':
     SET team_id = (SELECT t.id FROM team AS t WHERE t.name = ?)
     WHERE member.user_id IN user_ids
     AND member.team_id in team_ids
-    ;'''
+    ;"""
     df_dict = LDB.get_all_tables()
     for name, df in df_dict.items():
         print(df)
         print(name)
         print()
-    #discord_name = 'Everleigh#6056'
-    discord_name = 'FourLanChurro#8211'
-    #team_name = 'Team Rants'
-    team_name = 'Team No Rants'
+    # discord_name = 'Everleigh#6056'
+    discord_name = "FourLanChurro#8211"
+    # team_name = 'Team Rants'
+    team_name = "Team No Rants"
     params = (season_name, discord_name, team_name)
     LDB.cur.execute(sql, params)
     LDB.conn.commit()
@@ -1404,26 +1419,26 @@ if __name__ == '__main__':
     # seed sub request thread-id
     # game thread-id
 
-    #read_history()
+    # read_history()
 
     if False:
         print(LDB.get_games_by_week(season_name, week_num))
-        sql = '''
+        sql = """
         WITH week_ids AS (SELECT w.id FROM week AS w WHERE w.num = ?),
         seed_ids AS (SELECT s.id FROM seed AS s WHERE s.week_id IN week_ids)
         DELETE FROM game
         WHERE game.black_seed_id IN seed_ids OR game.white_seed_id IN seed_ids
-        ;'''
+        ;"""
         params = (week_num,)
-        #LDB.cur.execute(sql, params)
-        #LDB.conn.commit()
+        # LDB.cur.execute(sql, params)
+        # LDB.conn.commit()
         print(LDB.get_games_by_week(season_name, week_num))
 
-    #LDB.seed_games(season_name, week_num)
+    LDB.seed_games(season_name, week_num)
     print(LDB.get_games_by_week(season_name, week_num))
 
     raise Exception
-    '''
+    """
     rant_df = LDB.get_team_members(season_name, 'Team Rants', get_subs=False)
     nort_df = LDB.get_team_members(season_name, 'Team No Rants', get_subs=False)
     rant_sub_df = LDB.get_team_members(season_name, 'Team Rants', get_subs=True)
@@ -1437,7 +1452,7 @@ if __name__ == '__main__':
     print(nort_sub_df)
     print()
     LDB.league_leave(season_name, 878672511783567422)
-    '''
+    """
     df_dict = LDB.get_all_tables()
     for name, df in df_dict.items():
         print(df)
