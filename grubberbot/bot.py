@@ -74,7 +74,6 @@ async def on_ready():
     message = f"{bot.user.mention} has connected to {guild.name}"
     print(message)
     channel = discord.utils.get(guild.channels, name="grubberbot-logs")
-    channel = discord.utils.get(guild.channels, name="logs")
     await channel.send(message)
     fdd.update_google_sheet()
     # await fdd.announce_pairing(bot, guild)
