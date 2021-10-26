@@ -138,12 +138,12 @@ def download_db():
     if os.path.exists(DB_PATH):
         return
 
-    bucket_name = "grubberbot_backup"
-    storage_client = storage.Client.from_service_account_json(SERVICE_ACCOUNT_FILE)
-    bucket = storage_client.get_bucket(bucket_name)
-    blob = bucket.blob("rapid_league.sqlite3")
-    blob.download_to_filename(DB_PATH)
-    print("downloaded DB")
+    # bucket_name = "grubberbot_backup"
+    # storage_client = storage.Client.from_service_account_json(SERVICE_ACCOUNT_FILE)
+    # bucket = storage_client.get_bucket(bucket_name)
+    # blob = bucket.blob("rapid_league.sqlite3")
+    # blob.download_to_filename(DB_PATH)
+    # print("downloaded DB")
 
 
 def main():
