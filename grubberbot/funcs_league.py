@@ -46,7 +46,7 @@ class LeagueDatabase:
         self.cur = self.conn.cursor()
         self.conn.execute("PRAGMA foreign_keys = 1")
         self.conn.commit()
-        self.init_tables()
+        # self.init_tables()
         self.init_season()
         self.chess_db = fcc.ChesscomDatabase()
 
@@ -612,6 +612,7 @@ class LeagueDatabase:
             seq[i1], seq[i2] = seq[i2], seq[i1]
 
         def gen_team_dfs():
+            print(rant_df)
             rant_inds = list(range(len(rant_df)))
             nort_inds = list(range(len(nort_df)))
             score = score_inds(rant_inds, nort_inds)
@@ -654,7 +655,7 @@ class LeagueDatabase:
             print()
             return score, rdf, ndf
 
-        dfs = [gen_team_dfs() for i in range(16)]
+        dfs = [gen_team_dfs() for _ in range(16)]
         dfs = sorted(dfs, key=lambda x: x[0])
         print([d[0] for d in dfs])
         score, rdf, ndf = dfs[0]
@@ -1313,13 +1314,13 @@ def backup_databases():
 if __name__ == "__main__":
     LDB = LeagueDatabase()
     season_name = fgg.get_month()
-    week_num = 3
+    week_num = 4
     team_names = ["Team Nepomniachtchi", "Team Carlsen"]
 
     # print(LDB.get_season_games(season_name))
     # raise Exception
 
-    if True:
+    if False:
         print(LDB.get_games_by_week(season_name, week_num))
         sql = """
         WITH season_ids AS (SELECT s.id FROM season AS s WHERE s.name = ?),
@@ -1433,7 +1434,7 @@ if __name__ == "__main__":
         # LDB.conn.commit()
         print(LDB.get_games_by_week(season_name, week_num))
 
-    # LDB.seed_games(season_name, week_num)
+    LDB.seed_games(season_name, week_num)
     print(LDB.get_games_by_week(season_name, week_num))
 
     raise Exception
