@@ -1,9 +1,20 @@
 version: "3.9"
 services:
-  bot:
+
+  develop:
     build:
       context: .
-      target: ${STAGE}
-    image: bot:${STAGE}
+      target: develop
+    image: grubberbot:develop
     volumes:
-      - ./test:/usr/src/app
+      - ./grubberbot:/usr/src/app
+    depends_on:
+      - "test"
+
+  test:
+    build:
+      context: .
+      target: test
+    image: grubberbot:test
+    volumes:
+      - ./grubberbot:/usr/src/app

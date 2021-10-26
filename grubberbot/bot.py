@@ -1,18 +1,18 @@
+import datetime
+import json
+import logging
 import os
 import sys
-import json
-import discord
-from discord.ext import commands
 from pprint import pprint
-import logging
-import datetime
 from typing import Optional
-import pandas as pd
-import yaml
 
-import funcs_league as flg
+import discord
 import funcs_discord as fdd
 import funcs_general as fgg
+import funcs_league as flg
+import pandas as pd
+import yaml
+from discord.ext import commands
 
 logging.basicConfig(
     filename="grubberbot.log",
@@ -32,15 +32,17 @@ MODERATOR_ROLES = [
 # TODO: !info command
 # TODO: ping users before a season starts to make sure they're active on discord
 
-"""
-!list_commands
-
+# !list_commands
 # for scheduling a game
-!league_game_status <optional: @someone_else> - get info on status of the current game (where to go to talk about it, whether it's even scheduled), optional argument to use on someone else
+# !league_game_status <optional: @someone_else> - get info on status of the
+# current game (where to go to talk about it, whether it's even scheduled),
+# optional argument to use on someone else
 
-!league_schedule_game <date and time> - schedule a game, somehow i'll require confirmation from both players
-!mod_league_schedule_game <@someone> <date and time> - schedule a game without requiring confirmation
-"""
+# !league_schedule_game <date and time> - schedule a game, somehow i'll
+# require confirmation from both players
+
+# !mod_league_schedule_game <@someone> <date and time> - schedule a game
+# without requiring confirmation
 
 # Declare variables
 GUILD_NAME = "pawngrubber's server"
@@ -69,7 +71,10 @@ def set_league(discord_id, join_type):
 @bot.event
 async def on_ready():
     guild = discord.utils.get(bot.guilds, name=GUILD_NAME)
-    print(f"Bot {bot.user.name} has connected to {guild.name}")
+    message = f"{bot.user.mention} has connected to {guild.name}"
+    print(message)
+    channel = discord.utils.get(guild.channels, name="logs")
+    await channel.send(message)
     fdd.update_google_sheet()
     # await fdd.announce_pairing(bot, guild)
 

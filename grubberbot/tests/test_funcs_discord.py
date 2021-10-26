@@ -1,5 +1,7 @@
 import unittest
+
 import funcs_discord as fdd
+
 
 # Make sure the unittest module even loads
 class TestStringMethods(unittest.TestCase):

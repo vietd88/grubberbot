@@ -1,5 +1,6 @@
 import unittest
 
+
 # Make sure the unittest module even loads
 class TestStringMethods(unittest.TestCase):
     def test_upper(self):

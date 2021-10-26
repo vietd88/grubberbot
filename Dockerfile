@@ -21,10 +21,10 @@ RUN python3.8 -m pip install -U .[voice]
 WORKDIR /usr/src/app
 
 FROM base AS test
-CMD ["python3.8", "test.py"]
+CMD ["python3.8", "-m", "unittest", "discover", "-v"]
 
 FROM base AS develop
 CMD ["python3.8", "develop.py"]
 
 FROM base AS production
-CMD ["python3.8", "production.py"]
+CMD ["python3.8", "bot.py"]

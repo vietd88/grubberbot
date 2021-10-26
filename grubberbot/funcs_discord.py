@@ -1,21 +1,21 @@
-from discord.ext import commands
-from typing import Optional
+import datetime
+import logging
+import os
+import re
 from pprint import pformat, pprint
+from typing import Optional
+
+import discord
+import funcs_chesscom as fcc
+import funcs_general as fgg
+import funcs_google as fgo
+import funcs_league as flg
+import numpy as np
+import pandas as pd
+import pytz
+from discord.ext import commands, tasks
 from dotenv import load_dotenv
 from tqdm import tqdm
-import discord
-import pandas as pd
-import logging
-import datetime
-import os
-import numpy as np
-import re
-import pytz
-
-import funcs_google as fgo
-import funcs_general as fgg
-import funcs_chesscom as fcc
-import funcs_league as flg
 
 pd.options.mode.chained_assignment = None
 
@@ -71,7 +71,16 @@ def test_unittest():
 
 LDB = flg.LeagueDatabase()
 
-################ General commands
+
+@tasks.loop(seconds=60 * 15)
+async def regular_backup():
+    fgo.backup_db()
+
+
+regular_backup.start()
+
+
+# General commands
 async def get_all_threads(guild):
     threads = list(guild.threads)
     threads = threads + [
@@ -93,12 +102,12 @@ def update_discord_names(guild):
 
 async def announce_pairing(bot, guild):
     season_name = fgg.get_month(0)
-    week_num = 3
+    week_num = 4
 
     df = LDB.get_games_by_week(season_name, week_num)
     channel = discord.utils.get(guild.channels, name="📆-league-scheduling")
 
-    rows = [row for row in df.itertuples()]
+    rows = list(df.itertuples())
     for row in rows:
         title = fgg.gen_pairing_thread_name(
             row.game_id,
@@ -114,7 +123,7 @@ async def announce_pairing(bot, guild):
         )
         LDB.set_thread_id(row.game_id, thread.id)
         message = (
-            "Hi! October Rapid League Week 3 has started, please use "
+            "Hi! October Rapid League Week 4 has started, please use "
             "this thread so I can help you.  This thread is for:\n"
             "* **Scheduling your rapid game**  Any conversation outside of this "
             "thread cannot be regulated by moderators, please do all of your "
@@ -127,9 +136,11 @@ async def announce_pairing(bot, guild):
             "to the chess.com game.\n\n"
             f"<@{row.white_discord_id}> will play white\n"
             f"<@{row.black_discord_id}> will play black\n"
-            "See the pairings online: https://docs.google.com/spreadsheets/d/1SFH7ntDpDW7blX_xBU_m_kSmvY2tLXkuwq-TOM9wyew/edit#gid=2039965781\n\n"
+            "See the pairings online: "
+            "https://docs.google.com/spreadsheets/d/"
+            "1SFH7ntDpDW7blX_xBU_m_kSmvY2tLXkuwq-TOM9wyew/edit#gid=2039965781\n\n"
             "Some more things:\n"
-            "* You have until **October 23rd 11:59pm ET** to play your game.\n"
+            "* You have until **October 31st 11:59pm ET** to play your game.\n"
             "* If you need a substitute please ask in the #league-moderation room.\n"
             "* Contact your opponent as soon as possible.  If you wait too "
             "long to contact your opponent, a substitute will be called to "
@@ -265,7 +276,6 @@ def gen_season_info(season_name):
     player_dict = {0: "substitute", 1: "player"}
     for row in member_df.itertuples():
         request_subset = request_df[request_df["member_id"] == row.member_id]
-        sub_dict = {0: "no", 1: "yes"}
         request_dict = {int(r.week_num): r.request for r in request_subset.itertuples()}
 
         df_dict["team"].append(row.team_name)
@@ -350,7 +360,7 @@ def update_google_sheet():
         fgg.df_to_sheet(to_sheet, sheet=week_num + 1)
 
 
-################ Exception handling
+# Exception handling
 def gen_chesscom_username_error(mention, user_mention, mod=False):
     if mod:
         error_command = "!mod_set_chesscom"
@@ -365,7 +375,7 @@ def gen_chesscom_username_error(mention, user_mention, mod=False):
 
 def on_command_error(ctx, exception):
     user = ctx.message.author
-    mention = user.mention
+    # mention = user.mention
 
     # If user doesn't have permissions
     if isinstance(exception, commands.errors.CheckFailure):
@@ -402,7 +412,7 @@ def on_command_error(ctx, exception):
     return message
 
 
-######################## Define league membership commands
+# Define league membership commands
 async def general_set_chesscom(mention, user, chesscom):
     if not LDB.chess_db.get_exists(chesscom):
         message = f"{mention} Chess.com username not found: `{chesscom}`"
@@ -455,7 +465,7 @@ async def general_join(mention, user, season_name, join_type, mod=False):
         count_info = LDB.chess_db.get_count(chesscom)
         num_games = count_info["total_count"]
         num_rapid_games = count_info["rapid_count"]
-        if not join_type in player_args:
+        if join_type not in player_args:
             errors.append(f"Expected `{player_args}`, instead found: `{join_type}`")
         if num_rapid_games < 10:
             errors.append(
@@ -605,7 +615,7 @@ async def mod_leave_current(ctx, discord_mention: discord.Member):
     await ctx.send(message)
 
 
-######################### Define commands for scheduling and setting results
+# Define commands for scheduling and setting results
 time_zone_map = {
     "EST": "America/New_York",
     "ET": "America/New_York",
@@ -786,7 +796,7 @@ def general_set_result(mention, user, game_id, url=None, mod=False, result=None)
         )
         errors.append(message)
     if not game["rated"]:
-        message = f"Game is unrated, all games must be rated."
+        message = "Game is unrated, all games must be rated."
         errors.append(message)
     if (
         chesscom.lower() != chesscoms["white"].lower()
@@ -868,7 +878,7 @@ async def mod_custom_result(
     await ctx.send(message)
 
 
-######################## Define league substitution commands
+# Define league substitution commands
 async def general_claim_substitute(mention, user, guild, seed_id):
 
     # Ensure seed_id exists
@@ -905,7 +915,6 @@ async def general_claim_substitute(mention, user, guild, seed_id):
 
     # Ensure the player is playing less than 2 games
     df = LDB.get_games_by_week(season_name, week_num)
-    num_games = len(df)
     if len(df) >= 2:
         message = (
             f"{mention} User {user.mention} is already playing `{len(df)}` "
@@ -944,7 +953,9 @@ async def general_claim_substitute(mention, user, guild, seed_id):
         "* Posting your result.  When your game is done please use "
         "`!set_result <url>` (in this thread) where `<url>` is a"
         f" link to the chess.com game.\n\n"
-        "See the pairings online: https://docs.google.com/spreadsheets/d/1SFH7ntDpDW7blX_xBU_m_kSmvY2tLXkuwq-TOM9wyew/edit#gid=2039965781"
+        "See the pairings online: "
+        "https://docs.google.com/spreadsheets/d/"
+        "1SFH7ntDpDW7blX_xBU_m_kSmvY2tLXkuwq-TOM9wyew/edit#gid=2039965781"
     )
     await thread.send(message)
 
@@ -996,9 +1007,9 @@ async def general_request_substitute(
     # Get user chesscom
     user_data = LDB.get_user_data(user.id)
     if len(user_data) == 0:
-        message = gen_chesscom_username_error(mention, user_mention, mod=False)
+        message = gen_chesscom_username_error(mention, user.mention, mod=False)
         return message
-    chesscom = user_data["chesscom"][0]
+    # chesscom = user_data["chesscom"][0]
 
     # Verify that the user is signed up for the season
     season_name = fgg.get_month(int(is_next_season))
@@ -1017,7 +1028,7 @@ async def general_request_substitute(
 
     df = LDB.get_sub_announce(season_name, week_num, user.id)
     if len(df) > 0:
-        seed_id = df["seed_id"][0]
+        # seed_id = df["seed_id"][0]
         team_name = df["team_name"][0]
         team_mention = discord.utils.get(guild.roles, name=team_name).mention
         await announce_substitute(
@@ -1097,7 +1108,7 @@ async def mod_request_substitute_next(
     await ctx.send(message)
 
 
-############################### Other commands
+# Other commands
 
 
 @commands.command(name="test")
@@ -1117,13 +1128,16 @@ async def league_info(ctx, discord_mention: Optional[discord.Member] = None):
         message = "\n".join(
             [
                 f"{mention} ",
-                f"* Number of members in the {next_month} season: {len(df)}",
+                "* Doesn't work yet",
             ]
         )
     else:
         df = LDB.get_league_info(fgg.get_month(1), user.id)
         if len(df) == 0:
-            message = f"{mention} user {user.mention} is not signed up for the league {next_month} season"
+            message = (
+                f"{mention} user {user.mention} is not signed up for the "
+                f"league {next_month} season"
+            )
         else:
             info = {str(c): df[c][0] for c in df.columns}
             message = "\n".join(

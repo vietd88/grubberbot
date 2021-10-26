@@ -1,19 +1,19 @@
-from pprint import pprint, pformat
-from asyncio import gather
-import pandas as pd
-import chessdotcom as cdc
-import chessdotcom.aio as cdc_aio
-from chessdotcom.aio import Client as cdc_aio_client
-import urllib.request
-import urllib.error
-import urllib
 import datetime
-import sqlite3
-import time
 import json
 import re
+import sqlite3
+import time
+import urllib
+import urllib.error
+import urllib.request
+from asyncio import gather
+from pprint import pformat, pprint
 
+import chessdotcom as cdc
+import chessdotcom.aio as cdc_aio
 import funcs_general as fgg
+import pandas as pd
+from chessdotcom.aio import Client as cdc_aio_client
 
 CHESSCOM_DB = "data/chesscom.sqlite3"
 
@@ -76,7 +76,7 @@ async def get_game_history_async(chesscom):
 
 
 def game_id_from_url(url):
-    integers = [int(i[0]) for i in re.finditer("[\d]+", url)]
+    integers = [int(i[0]) for i in re.finditer(r"[\d]+", url)]
     if len(integers) == 0:
         return None
     cc_game_id = max(integers)
@@ -202,20 +202,19 @@ class ChesscomDatabase:
 
         categories = [
             "chess_rapid",
-            #'lessons',
-            #'tactics',
+            # 'lessons',
+            # 'tactics',
             "chess960_daily",
             "chess_blitz",
-            #'puzzle_rush',
+            # 'puzzle_rush',
             "chess_bullet",
             "chess_daily",
-            #'fide',
+            # 'fide',
         ]
         wdl_list = ["win", "draw", "loss"]
 
         output = {}
         for category in categories:
-            num_games = 0
             try:
                 wdl = info[category]["record"]
             except KeyError:
@@ -305,7 +304,7 @@ class ChesscomDatabase:
         for k, v in names.items():
             try:
                 val = info[v[0]][v[1]][v[2]]  # if not KeyError else None
-            except KeyError as e:
+            except KeyError:
                 val = None
             output[k] = val
         output["rating_time"] = time.time()
