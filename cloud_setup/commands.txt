@@ -1,0 +1,33 @@
+# Update the machine, starting with ubuntu 20.04
+sudo apt-get update -y && sudo apt-get upgrade -y
+sudo DEBIAN_FRONTEND="noninteractive" apt-get -y install --upgrade tzdata
+sudo apt-get update -y && sudo apt-get upgrade -y
+
+# Install things to use
+sudo apt-get install -y --upgrade htop git vim python3 python3.8 python3-pip
+sudo python3.8 -m pip install --upgrade pip
+sudo python3.8 -m pip install --upgrade pip
+
+# Install docker
+sudo apt-get remove -y docker docker-engine docker.io containerd runc
+sudo apt-get install -y --upgrade ca-certificates curl gnupg lsb-release
+sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+sudo echo \
+  "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu \
+  $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+# The command below is unstable long-term
+sudo add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu bionic stable"
+sudo apt-get install -y --upgrade docker-ce docker-ce-cli containerd.io
+
+# Install docker-compose
+sudo curl -L "https://github.com/docker/compose/releases/download/1.29.2/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+sudo chmod +x /usr/local/bin/docker-compose
+
+# Install the repo
+sudo git clone --single-branch --branch production https://github.com/pawngrubber/grubberbot.git
+#### Move over credential files
+
+# Set up reboot
+(crontab -l 2>/dev/null; echo "@reboot cd /home/pawngrubber/grubberbot && sudo /usr/bin/python3.8 /home/pawngrubber/grubberbot/cloud_setup/reboot.py")| sudo crontab -
+sudo reboot

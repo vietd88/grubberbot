@@ -1,0 +1,10 @@
+version: "3.9"
+services:
+
+  bot:
+    build:
+      context: .
+      target: production
+    image: grubberbot:bot
+    volumes:
+      - ./grubberbot:/usr/src/app
