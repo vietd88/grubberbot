@@ -2,6 +2,8 @@ from __future__ import print_function
 
 import datetime
 import os.path
+import urllib
+import urllib.request
 from pprint import pprint
 
 from google.auth.transport.requests import Request
@@ -10,8 +12,6 @@ from google.oauth2 import service_account
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build as gc_build
-import urllib
-import urllib.request
 
 SCOPES = [
     "https://www.googleapis.com/auth/calendar",
@@ -140,8 +140,8 @@ def download_db():
     if os.path.exists(DB_PATH):
         return
 
-    db_name = 'https://storage.googleapis.com/grubberbot_backup/rapid_league.sqlite3'
-    urllib.request.urlretrieve(db_name, 'data/rapid_league.sqlite3')
+    db_name = "https://storage.googleapis.com/grubberbot_backup/rapid_league.sqlite3"
+    urllib.request.urlretrieve(db_name, "data/rapid_league.sqlite3")
 
     # bucket_name = "grubberbot_backup"
     # storage_client = storage.Client.from_service_account_json(SERVICE_ACCOUNT_FILE)

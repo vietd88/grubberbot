@@ -17,6 +17,7 @@
 3. Open a command line prompt and navigate to the grubberbot directory
    4. Build the application
     ```
+    pre-commit run --all-files
     docker-compose up --build --force-recreate --remove-orphans
     ```
    5. In between builds make sure to remove dangling images
