@@ -2,6 +2,7 @@ import datetime
 import logging
 import os
 import re
+import subprocess
 from pprint import pformat, pprint
 from typing import Optional
 
@@ -1109,6 +1110,12 @@ async def mod_request_substitute_next(
 
 
 # Other commands
+@commands.command(name="reboot")
+@commands.has_any_role(*MODERATOR_ROLES)
+async def reboot(ctx):
+    """Reboot GrubberBot, which also pulls the latest from production"""
+    await ctx.send("Rebooting...")
+    subprocess.run("sudo reboot", shell=True, cwd=".", capture_output=True)
 
 
 @commands.command(name="test")
